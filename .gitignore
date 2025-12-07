@@ -3,6 +3,18 @@ build/
 *.o
 *.exe
 
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+DartConfiguration.tcl
+*.cmake
+!CMakeLists.txt
+
 # Dependencies
 node_modules/
 
@@ -30,3 +42,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+.cache/
+server/backend/server
+client/backend/client
