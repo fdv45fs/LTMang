@@ -8,6 +8,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 include_directories(${CMAKE_SOURCE_DIR}/libs/mongoose)
 include_directories(${CMAKE_SOURCE_DIR}/libs/cJSON)
 include_directories(${CMAKE_SOURCE_DIR}/common)
+include_directories(${CMAKE_SOURCE_DIR}/messages)
+include_directories(${CMAKE_SOURCE_DIR}/dto)
 
 # Source files
 set(SOURCES

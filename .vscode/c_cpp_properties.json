@@ -6,7 +6,9 @@
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/libs/cJSON",
                 "${workspaceFolder}/libs/mongoose",
-                "${workspaceFolder}/common"
+                "${workspaceFolder}/common",
+                "${workspaceFolder}/messages",
+                "${workspaceFolder}/dto"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
