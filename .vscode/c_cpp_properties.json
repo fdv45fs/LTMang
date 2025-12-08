@@ -5,7 +5,8 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/libs/cJSON",
-                "${workspaceFolder}/libs/mongoose"
+                "${workspaceFolder}/libs/mongoose",
+                "${workspaceFolder}/common"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

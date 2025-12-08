@@ -1,0 +1,114 @@
+// --- QUẢN LÝ NGƯỜI DÙNG ---
+Table Users {
+  id integer [primary key, increment]
+  username varchar [not null, unique]
+  password_hash varchar [not null]
+  full_name varchar
+  email varchar [not null]
+  phone varchar
+  role varchar [not null]
+  created_at timestamp [default: `now()`]
+}
+
+// --- QUẢN LÝ MÁY BAY & SÂN BAY ---
+Table Airports {
+  id integer [primary key, increment]
+  code varchar(3) [unique]
+  name varchar
+  city varchar
+}
+
+Table Aircrafts {
+  id integer [primary key, increment]
+  model varchar
+  total_capacity integer
+}
+
+// Phục vụ UC10 (Socket Push)
+Table Notifications {
+  id integer [primary key, increment]
+  user_id integer [ref: > Users.id]
+  title varchar
+  message text
+  is_read boolean [default: false]
+  created_at timestamp [default: `now()`]
+  related_flight_id integer [ref: > Flights.id, note: 'Để link đến chuyến bay bị delay/hủy']
+}
+
+// --- QUẢN LÝ CHUYẾN BAY ---
+Table Flights {
+  id integer [primary key, increment]
+  flight_code varchar [unique]
+  aircraft_id integer [ref: > Aircrafts.id]
+  origin_airport_id integer [ref: > Airports.id]
+  destination_airport_id integer [ref: > Airports.id]
+  departure_time timestamp
+  arrival_time timestamp
+  status varchar
+}
+
+// --- QUẢN LÝ GIÁ VÉ (TỔNG QUAN) ---
+Table FlightClasses {
+  id integer [primary key, increment]
+  flight_id integer [ref: > Flights.id]
+  class_type varchar [note: 'ECONOMY, BUSINESS']
+  price decimal(15, 2)
+  total_seats integer
+  booked_seats integer [note: 'Dùng để đếm nhanh số lượng còn lại']
+  info text
+}
+
+// --- [MỚI] QUẢN LÝ CHI TIẾT TỪNG GHẾ (SEAT MAP) ---
+// Bảng này giải quyết vấn đề quản lý ghế trống/hủy vé
+Table FlightSeats {
+  id integer [primary key, increment]
+  seat_number varchar [note: '12A, 12B...']
+  class_type_id integer [ref: > FlightClasses.id]
+  status varchar [default: 'AVAILABLE', note: 'AVAILABLE, LOCKED, BOOKED']
+  info text
+}
+
+// --- QUẢN LÝ ĐẶT VÉ ---
+Table Bookings {
+  id integer [primary key, increment]
+  user_id integer [ref: > Users.id]
+  booking_date timestamp
+  total_amount decimal(15, 2)
+  status varchar [default: 'PENDING', note: 'PENDING, CONFIRMED, CANCELLED']
+  booking_reference varchar [unique]
+}
+
+// --- CHI TIẾT VÉ ---
+Table Tickets {
+  id integer [primary key, increment]
+  booking_id integer [ref: > Bookings.id]
+  //flight_id integer [ref: > Flights.id]
+  
+  // Link trực tiếp đến ghế trong kho ghế
+  flight_seat_id integer [ref: - FlightSeats.id] 
+  
+  passenger_name varchar
+  passenger_ic_number varchar
+  ticket_number varchar [unique]
+  
+  // Trạng thái vé riêng biệt (để lưu lịch sử dù đã hủy)
+  status varchar [default: 'ACTIVE', note: 'ACTIVE, CANCELLED']
+}
+
+// --- CÁC BẢNG KHÁC ---
+Table Payments {
+  id integer [primary key, increment]
+  booking_id integer [ref: - Bookings.id]
+  transaction_date timestamp
+  transaction_id varchar
+  amount decimal  
+  status varchar
+}
+
+Table SystemLogs {
+  id integer [primary key, increment]
+  user_id integer [ref: > Users.id]
+  action_type varchar
+  details text
+  timestamp timestamp
+}
