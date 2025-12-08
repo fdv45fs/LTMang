@@ -1,8 +1,8 @@
 # Ứng Dụng Đặt Vé Máy Bay
 
 Ứng dụng demo kiến trúc client-server với:
-- **Server Backend**: C TCP server (Port 8080)
-- **Database Service**: Python service với JSON communication (Port 5000)
+- **Server Backend**: C TCP server + HTTP client (Mongoose) (Port 8080)
+- **Database Service**: Python HTTP server với JSON API (Port 5000)
 - **Client Backend**: C HTTP server (Mongoose) + TCP client (Port 3001)
 - **Client Frontend**: React + Vite + shadcn UI (Port 3000)
 
@@ -14,8 +14,8 @@ React Frontend (Port 3000)
 Client Backend - HTTP Server (Port 3001)
     ↓ TCP Socket
 Server Backend - TCP Server (Port 8080)
-    ↓ TCP Socket + JSON
-Database Service - Python (Port 5000)
+    ↓ HTTP + JSON
+Database Service - Python HTTP Server (Port 5000)
 ```
 
 ## Cấu trúc thư mục
@@ -26,10 +26,10 @@ Setup/
 │   ├── cJSON/
 │   └── mongoose/
 ├── server/
-│   ├── backend/               # C TCP Server
+│   ├── backend/               # C TCP Server + HTTP Client
 │   │   ├── CMakeLists.txt
 │   │   └── main.c
-│   └── database_service/      # Python Database Service
+│   └── database_service/      # Python HTTP Server
 │       └── main.py
 ├── client/
 │   ├── backend/               # C HTTP Server + TCP Client
