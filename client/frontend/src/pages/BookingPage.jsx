@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { createBooking, processPayment } from '@/lib/api';
+import { createBooking } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,14 +13,13 @@ export default function BookingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   
-  const flight = location.state?.flight;
+  const flight = location.state?.flight || location.state?.booking?.flight;
   
   const [classType, setClassType] = useState('ECONOMY');
   const [passengerCount, setPassengerCount] = useState(1);
   const [passengers, setPassengers] = useState([{ name: user?.full_name || '', ic_number: '' }]);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState(1); // 1: Info, 2: Payment, 3: Done
-  const [bookingResult, setBookingResult] = useState(null);
+  const [step] = useState(1);
   const [error, setError] = useState('');
 
   if (!flight) {
@@ -68,7 +67,7 @@ export default function BookingPage() {
     setPassengers(newPassengers);
   };
 
-  const handleSubmitBooking = async () => {
+  const handleSubmitBooking = async (proceedToPayment = true) => {
     // Validate
     for (let i = 0; i < passengers.length; i++) {
       if (!passengers[i].name || !passengers[i].ic_number) {
@@ -84,8 +83,17 @@ export default function BookingPage() {
       const result = await createBooking(user.id, flight.id, classType, passengers);
       
       if (result.success) {
-        setBookingResult(result.booking);
-        setStep(2);
+        if (proceedToPayment) {
+          // Điều hướng sang trang thanh toán riêng
+          navigate('/payments', { state: { booking: result.booking, flight: { 
+            flight_code: flight.flight_code,
+            origin_code: flight.origin.code,
+            dest_code: flight.destination.code,
+          } } });
+        } else {
+          // Đặt vé nhưng chưa thanh toán: chuyển sang lịch sử
+          navigate('/history');
+        }
       } else {
         setError(result.message || 'Đặt vé thất bại');
       }
@@ -96,24 +104,7 @@ export default function BookingPage() {
     }
   };
 
-  const handlePayment = async () => {
-    setLoading(true);
-    setError('');
-
-    try {
-      const result = await processPayment(bookingResult.id);
-      
-      if (result.success) {
-        setStep(3);
-      } else {
-        setError(result.message || 'Thanh toán thất bại');
-      }
-    } catch (err) {
-      setError('Lỗi kết nối server');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Đã tách sang trang Payments riêng
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 to-blue-100 py-8">
@@ -214,73 +205,12 @@ export default function BookingPage() {
                 <div className="text-red-500 text-sm bg-red-50 p-3 rounded">{error}</div>
               )}
 
-              <Button onClick={handleSubmitBooking} disabled={loading} className="w-full">
-                {loading ? 'Đang xử lý...' : 'Tiếp tục thanh toán'}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step 2: Payment */}
-        {step === 2 && bookingResult && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Thanh toán</CardTitle>
-              <CardDescription>
-                Mã đặt chỗ: <strong>{bookingResult.booking_reference}</strong>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <h3 className="font-medium mb-2">Chi tiết vé đã đặt:</h3>
-                {bookingResult.tickets.map((ticket, i) => (
-                  <div key={i} className="text-sm text-gray-600">
-                    • {ticket.passenger_name} - Ghế {ticket.seat_number}
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex justify-between items-center p-4 bg-sky-50 rounded-lg">
-                <span className="font-medium">Số tiền thanh toán:</span>
-                <span className="text-2xl font-bold text-sky-600">
-                  {formatPrice(bookingResult.total_amount)}
-                </span>
-              </div>
-
-              <div className="p-4 border rounded-lg">
-                <p className="text-sm text-gray-500 mb-4">
-                  (Demo) Nhấn nút bên dưới để hoàn tất thanh toán
-                </p>
-              </div>
-
-              {error && (
-                <div className="text-red-500 text-sm bg-red-50 p-3 rounded">{error}</div>
-              )}
-
-              <Button onClick={handlePayment} disabled={loading} className="w-full">
-                {loading ? 'Đang xử lý...' : '💳 Xác nhận thanh toán'}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step 3: Success */}
-        {step === 3 && (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <div className="text-6xl mb-4">✅</div>
-              <h2 className="text-2xl font-bold text-green-600 mb-2">
-                Đặt vé thành công!
-              </h2>
-              <p className="text-gray-600 mb-6">
-                Mã đặt chỗ của bạn: <strong className="text-xl">{bookingResult?.booking_reference}</strong>
-              </p>
-              <div className="flex gap-4 justify-center">
-                <Button onClick={() => navigate('/history')}>
-                  Xem vé của tôi
+              <div className="grid grid-cols-2 gap-3">
+                <Button onClick={() => handleSubmitBooking(false)} disabled={loading} variant="outline">
+                  {loading ? '...' : 'Đặt vé'}
                 </Button>
-                <Button variant="outline" onClick={() => navigate('/')}>
-                  Đặt vé khác
+                <Button onClick={() => handleSubmitBooking(true)} disabled={loading} className="">
+                  {loading ? 'Đang xử lý...' : 'Tiếp tục thanh toán'}
                 </Button>
               </div>
             </CardContent>

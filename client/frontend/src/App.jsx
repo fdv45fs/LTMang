@@ -4,6 +4,9 @@ import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import BookingPage from './pages/BookingPage';
 import HistoryPage from './pages/HistoryPage';
+import RegisterPage from './pages/RegisterPage';
+import PaymentsPage from './pages/PaymentsPage';
+import AdminFlightsPage from './pages/AdminFlightsPage';
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -56,6 +59,28 @@ function AppRoutes() {
             <HistoryPage />
           </ProtectedRoute>
         } 
+      />
+      <Route 
+        path="/payments" 
+        element={
+          <ProtectedRoute>
+            <PaymentsPage />
+          </ProtectedRoute>
+        } 
+      />
+      {user?.role === 'ADMIN' && (
+        <Route 
+          path="/admin/flights" 
+          element={
+            <ProtectedRoute>
+              <AdminFlightsPage />
+            </ProtectedRoute>
+          } 
+        />
+      )}
+      <Route
+        path="/register"
+        element={user ? <Navigate to="/" replace /> : <RegisterPage />}
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -48,7 +48,8 @@ typedef struct {
 typedef struct {
     int origin_airport_id;      // ID sân bay đi (0 = tất cả)
     int destination_airport_id; // ID sân bay đến (0 = tất cả)
-    int64_t departure_date;     // Ngày khởi hành (Unix timestamp, 0 = tất cả)
+    char start_date[12];    // Thay int64_t bằng chuỗi để chứa "YYYY-MM-DD"
+    char end_date[12];       // Ngày về (Unix timestamp, 0 = một chiều)
     int passenger_count;        // Số lượng hành khách
     uint8_t sort_by;            // SortOption enum
 } SearchFlightsRequest;

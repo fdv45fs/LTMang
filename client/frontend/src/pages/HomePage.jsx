@@ -1,26 +1,34 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { searchFlights, getAirports } from '@/lib/api';
+import { searchFlights, getAirports, getSystemLogs, adminFlightDetails } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input'; // Đảm bảo đã import Input
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export default function HomePage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   
   const [airports, setAirports] = useState([]);
+  
+  // State tìm kiếm
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
+  const [startDate, setStartDate] = useState(''); // Thêm state ngày đi
+  const [endDate, setEndDate] = useState('');     // Thêm state ngày về
+
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [passengers, setPassengers] = useState(1);
 
   useEffect(() => {
     loadAirports();
-    // Load all flights on mount
+    // Load danh sách ban đầu (không filter)
     handleSearch();
   }, []);
 
@@ -33,10 +41,15 @@ export default function HomePage() {
 
   const handleSearch = async () => {
     setLoading(true);
+    // Gọi API với đầy đủ 4 tham số: origin, destination, start_date, end_date
     const result = await searchFlights(
       origin ? parseInt(origin) : 0,
-      destination ? parseInt(destination) : 0
+      destination ? parseInt(destination) : 0,
+      startDate,
+      endDate,
+      passengers
     );
+    
     if (result.success) {
       setFlights(result.flights);
     }
@@ -63,6 +76,16 @@ export default function HomePage() {
     navigate('/booking', { state: { flight } });
   };
 
+  // Admin-only: inline flight details
+  const [openDetails, setOpenDetails] = useState(false);
+  const [details, setDetails] = useState(null);
+  const showDetails = async (flightId) => {
+    setDetails(null);
+    setOpenDetails(true);
+    const res = await adminFlightDetails(flightId);
+    if (res?.success) setDetails(res);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 to-blue-100">
       {/* Header */}
@@ -70,25 +93,41 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-xl font-bold text-sky-700">✈️ Flight Booking</h1>
           <div className="flex items-center gap-4">
-            <span className="text-gray-600">Xin chào, <strong>{user?.full_name}</strong></span>
-            <Button variant="outline" size="sm" onClick={() => navigate('/history')}>
-              Vé của tôi
-            </Button>
-            <Button variant="ghost" size="sm" onClick={logout}>
-              Đăng xuất
-            </Button>
+            {user ? (
+                <>
+                    {user.role === 'ADMIN' && (
+                      <Button variant="ghost" size="sm" onClick={() => navigate('/admin/flights')}>
+                        Quản lý chuyến bay
+                      </Button>
+                    )}
+                    <span className="text-gray-600">Xin chào, <strong>{user.full_name}</strong></span>
+                    {user.role !== 'ADMIN' && (
+                      <Button variant="outline" size="sm" onClick={() => navigate('/history')}>
+                        Vé của tôi
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={logout}>
+                      Đăng xuất
+                    </Button>
+                </>
+            ) : (
+                <Button onClick={() => navigate('/login')}>Đăng nhập</Button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {/* System Logs for Admin */}
+        {user?.role === 'ADMIN' && <AdminLogsSection />}
         {/* Search Form */}
-        <Card className="mb-8">
+        <Card className="mb-8 shadow-md">
           <CardHeader>
-            <CardTitle>Tìm chuyến bay</CardTitle>
+            <CardTitle className="text-sky-800">Tìm chuyến bay</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+              {/* Điểm đi */}
               <div className="space-y-2">
                 <Label>Điểm đi</Label>
                 <Select value={origin} onValueChange={setOrigin}>
@@ -106,6 +145,7 @@ export default function HomePage() {
                 </Select>
               </div>
 
+              {/* Điểm đến */}
               <div className="space-y-2">
                 <Label>Điểm đến</Label>
                 <Select value={destination} onValueChange={setDestination}>
@@ -123,9 +163,41 @@ export default function HomePage() {
                 </Select>
               </div>
 
-              <div className="flex items-end">
-                <Button onClick={handleSearch} disabled={loading} className="w-full">
-                  {loading ? 'Đang tìm...' : '🔍 Tìm kiếm'}
+              {/* Ngày đi */}
+              <div className="space-y-2">
+                <Label>Từ ngày</Label>
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="block w-full"
+                />
+              </div>
+
+              {/* Ngày về */}
+              <div className="space-y-2">
+                <Label>Đến ngày</Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="block w-full"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Hành khách</Label>
+                <Input 
+                    type="number" 
+                    min="1" 
+                    max="10"
+                    value={passengers} 
+                    onChange={(e) => setPassengers(e.target.value)} 
+                />
+              </div>
+              {/* Nút tìm kiếm */}
+              <div>
+                <Button onClick={handleSearch} disabled={loading} className="w-full bg-sky-600 hover:bg-sky-700">
+                  {loading ? 'Đang tìm...' : 'Tìm kiếm'}
                 </Button>
               </div>
             </div>
@@ -135,74 +207,91 @@ export default function HomePage() {
         {/* Results */}
         {searched && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-lg font-semibold text-gray-700">
               Kết quả: {flights.length} chuyến bay
             </h2>
             
             {flights.length === 0 ? (
               <Card>
-                <CardContent className="py-8 text-center text-gray-500">
-                  Không tìm thấy chuyến bay phù hợp
+                <CardContent className="py-12 text-center text-gray-500">
+                  <div className="text-4xl mb-4">🛬</div>
+                  <p>Không tìm thấy chuyến bay phù hợp với tiêu chí của bạn.</p>
                 </CardContent>
               </Card>
             ) : (
               flights.map((flight) => (
-                <Card key={flight.id} className="hover:shadow-lg transition-shadow">
+                <Card key={flight.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-sky-500">
                   <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
                       {/* Flight Info */}
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="font-bold text-lg text-sky-700">{flight.flight_code}</span>
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            flight.status === 'SCHEDULED' ? 'bg-green-100 text-green-700' :
-                            flight.status === 'DELAYED' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {flight.status}
+                        <div className="flex items-center gap-3 mb-4">
+                          <span className="font-bold text-lg text-sky-700 bg-sky-50 px-3 py-1 rounded">
+                            {flight.flight_code}
+                          </span>
+                          <span className="text-sm text-gray-500 font-medium">
+                            {flight.aircraft_model}
                           </span>
                         </div>
                         
-                        <div className="flex items-center gap-4 text-gray-600">
-                          <div className="text-center">
-                            <div className="font-bold text-xl">{flight.origin.code}</div>
-                            <div className="text-sm">{flight.origin.city}</div>
-                          </div>
-                          <div className="flex-1 flex items-center justify-center">
-                            <div className="border-t-2 border-dashed border-gray-300 w-full relative">
-                              <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2">
-                                ✈️
-                              </span>
+                        <div className="flex items-center gap-6 text-gray-700">
+                          <div className="text-center min-w-[80px]">
+                            <div className="font-bold text-2xl">{flight.origin.code}</div>
+                            <div className="text-sm text-gray-500">{flight.origin.city}</div>
+                            <div className="text-xs font-semibold mt-1 text-sky-600">
+                                {formatTime(flight.departure_time).split(' ')[1]}
                             </div>
                           </div>
-                          <div className="text-center">
-                            <div className="font-bold text-xl">{flight.destination.code}</div>
-                            <div className="text-sm">{flight.destination.city}</div>
+                          
+                          <div className="flex-1 flex flex-col items-center justify-center px-4">
+                            <div className="text-xs text-gray-400 mb-1">Bay thẳng</div>
+                            <div className="w-full h-[2px] bg-gray-300 relative">
+                                <span className="absolute right-0 -top-[3px] w-2 h-2 bg-gray-300 rounded-full"></span>
+                                <span className="absolute left-0 -top-[3px] w-2 h-2 bg-gray-300 rounded-full"></span>
+                                <span className="absolute left-1/2 -top-2 -translate-x-1/2 text-gray-400">✈</span>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-1">
+                                {new Date(flight.departure_time).toLocaleDateString('vi-VN')}
+                            </div>
                           </div>
-                        </div>
-                        
-                        <div className="mt-2 text-sm text-gray-500">
-                          {formatTime(flight.departure_time)} → {formatTime(flight.arrival_time)}
+                          
+                          <div className="text-center min-w-[80px]">
+                            <div className="font-bold text-2xl">{flight.destination.code}</div>
+                            <div className="text-sm text-gray-500">{flight.destination.city}</div>
+                            <div className="text-xs font-semibold mt-1 text-sky-600">
+                                {formatTime(flight.arrival_time).split(' ')[1]}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
+                      {/* Divider */}
+                      <div className="hidden md:block w-[1px] h-24 bg-gray-200 mx-4"></div>
+
                       {/* Price & Book */}
-                      <div className="text-right">
-                        <div className="mb-2">
+                      <div className="text-right min-w-[150px]">
+                        <div className="mb-3">
                           <div className="text-sm text-gray-500">Phổ thông từ</div>
-                          <div className="text-2xl font-bold text-sky-600">
+                          <div className="text-2xl font-bold text-orange-600">
                             {formatPrice(flight.economy_price)}
                           </div>
-                          <div className="text-xs text-gray-400">
-                            Còn {flight.economy_available} ghế
+                          <div className="text-xs text-gray-400 mt-1">
+                            {((flight.economy_available || 0) + (flight.business_available || 0)) > 0
+                              ? `Tổng còn ${(flight.economy_available || 0) + (flight.business_available || 0)} ghế`
+                              : <span className="text-red-500">Hết vé</span>}
                           </div>
                         </div>
-                        <Button 
-                          onClick={() => handleBook(flight)}
-                          disabled={flight.economy_available === 0}
-                        >
-                          Đặt vé
-                        </Button>
+                        {user?.role !== 'ADMIN' ? (
+                          <Button 
+                            onClick={() => handleBook(flight)}
+                            disabled={((flight.economy_available || 0) + (flight.business_available || 0)) < Number(passengers)}
+                            className="w-full bg-orange-500 hover:bg-orange-600"
+                          >
+                            Chọn vé
+                          </Button>
+                        ) : (
+                          <Button onClick={() => showDetails(flight.id)} className="w-full">Xem chi tiết</Button>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -212,6 +301,70 @@ export default function HomePage() {
           </div>
         )}
       </main>
+      {/* Admin flight details modal */}
+      <Dialog open={openDetails} onOpenChange={setOpenDetails}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Chi tiết chuyến bay</DialogTitle>
+          </DialogHeader>
+          {!details ? (
+            <div>Đang tải...</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="text-sm text-gray-700">
+                <div><strong>{details.flight.flight_code}</strong> — {details.flight.origin_code} → {details.flight.dest_code} ({details.flight.aircraft_model})</div>
+                <div>{details.flight.departure_time} → {details.flight.arrival_time} | Trạng thái: {details.flight.status}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Card><CardContent className="p-3"><div>Đã đặt Economy: <strong>{details.summary.economy_booked}</strong></div></CardContent></Card>
+                <Card><CardContent className="p-3"><div>Đã đặt Business: <strong>{details.summary.business_booked}</strong></div></CardContent></Card>
+              </div>
+              <div>
+                <Card>
+                  <CardHeader><CardTitle>Người dùng đặt/ thanh toán</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-80 overflow-auto">
+                      {details.users.map(u => (
+                        <div key={`${u.user_id}-${u.booking_id}`} className="p-2 border rounded">
+                          <div className="flex justify-between">
+                            <span className="font-medium">{u.full_name} (User #{u.user_id})</span>
+                            <span className="text-sm">Đã thanh toán: {new Intl.NumberFormat('vi-VN').format(u.paid_amount)} đ</span>
+                          </div>
+                          <div className="text-sm text-gray-600">Booking #{u.booking_id} — Trạng thái: {u.booking_status}</div>
+                          <div className="text-sm">Economy: {u.economy_tickets} vé • Business: {u.business_tickets} vé</div>
+                        </div>
+                      ))}
+                      {details.users.length === 0 && <div className="text-gray-500">Chưa có người dùng đặt vé</div>}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+function AdminLogsSection() {
+  const [logs, setLogs] = useState([]);
+  useEffect(() => { (async ()=>{ const res = await getSystemLogs({ limit: 50 }); if (res?.success) setLogs(res.logs||[]); })(); }, []);
+  return (
+    <Card className="mb-6">
+      <CardHeader><CardTitle>Logs hệ thống</CardTitle></CardHeader>
+      <CardContent>
+        <div className="space-y-2 max-h-64 overflow-auto">
+          {logs.map((l)=> (
+            <div key={l.id} className="text-sm text-gray-700 flex justify-between">
+              <span className="font-medium">{l.action_type}</span>
+              <span className="text-gray-500">{l.details}</span>
+              <span className="text-gray-400">{new Date(l.timestamp).toLocaleString('vi-VN')}</span>
+            </div>
+          ))}
+          {logs.length === 0 && <div className="text-gray-500">Không có log</div>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -52,10 +52,14 @@ typedef enum {
     MSG_ADMIN_UPDATE_PRICE_RES  = 0x0385,
     MSG_ADMIN_GET_LOGS_REQ      = 0x0306,   // UC13: Xem logs
     MSG_ADMIN_GET_LOGS_RES      = 0x0386,
+    MSG_ADMIN_FLIGHT_DETAILS_REQ= 0x0307,   // Admin: Chi tiết chuyến bay
+    MSG_ADMIN_FLIGHT_DETAILS_RES= 0x0387,
 
     // Group 04: Common/Utility
     MSG_GET_AIRPORTS_REQ    = 0x0401,   // Lấy danh sách sân bay
     MSG_GET_AIRPORTS_RES    = 0x0481,
+    MSG_GET_AIRCRAFTS_REQ   = 0x0402,   // Lấy danh sách máy bay
+    MSG_GET_AIRCRAFTS_RES   = 0x0482,
     MSG_ERROR               = 0x04FF    // Generic error response
 } MessageType;
 

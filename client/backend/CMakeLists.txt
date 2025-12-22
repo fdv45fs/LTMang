@@ -26,5 +26,3 @@ target_link_libraries(client pthread)
 
 # Define MG_ENABLE_LINES for better Mongoose debugging
 target_compile_definitions(client PRIVATE MG_ENABLE_LINES=1)
-
-

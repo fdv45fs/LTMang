@@ -80,12 +80,21 @@ export default function LoginPage() {
               {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
             </Button>
           </form>
-
+          <div className="mt-4 text-center text-sm">
+              Chưa có tài khoản?{" "}
+              <span 
+                className="text-blue-600 hover:underline cursor-pointer font-medium"
+                onClick={() => navigate('/register')}
+              >
+                Đăng ký ngay
+              </span>
+          </div>
           <div className="mt-6 p-3 bg-gray-50 rounded-lg text-sm">
             <p className="font-medium mb-2">Tài khoản test:</p>
             <p><code>nguyenvana / 123456</code> - User có booking</p>
             <p><code>lethic / 123456</code> - User mới</p>
           </div>
+
         </CardContent>
       </Card>
     </div>

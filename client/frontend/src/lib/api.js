@@ -29,6 +29,13 @@ async function request(endpoint, options = {}) {
 // AUTH API
 // ============================================================================
 
+export async function register(userData) {
+  return request('/register', {
+    method: 'POST',
+    body: JSON.stringify(userData),
+  });
+}
+
 export async function login(username, password) {
   return request('/login', {
     method: 'POST',
@@ -40,16 +47,23 @@ export async function login(username, password) {
 // FLIGHTS API
 // ============================================================================
 
-export async function searchFlights(origin = 0, destination = 0) {
-  const params = new URLSearchParams();
-  if (origin) params.append('origin', origin);
-  if (destination) params.append('destination', destination);
-  
-  return request(`/flights?${params.toString()}`);
+export async function searchFlights(originId, destId, startDate, endDate, passengers) { 
+  const params = new URLSearchParams({
+      origin_id: originId,
+      dest_id: destId,
+      start_date: startDate || '',
+      end_date: endDate || '',
+      passengers: passengers || 1
+  });
+  return request(`/flights?${params.toString()}`, { method: 'GET' });
 }
 
 export async function getAirports() {
   return request('/airports');
+}
+
+export async function getAircrafts() {
+  return request('/aircrafts');
 }
 
 // ============================================================================
@@ -90,12 +104,64 @@ export async function processPayment(bookingId, paymentMethod = 'CARD') {
   });
 }
 
+export async function cancelBooking(bookingId) {
+  return request('/bookings/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ booking_id: bookingId }),
+  });
+}
+
+// ============================================================================
+// ADMIN API
+// ============================================================================
+
+export async function adminListFlights() {
+  return request('/admin/flights', { method: 'GET' });
+}
+
+export async function adminCreateFlight(payload) {
+  return request('/admin/flights', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function adminUpdateFlight(flightId, payload) {
+  return request(`/admin/flights/${flightId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function adminDeleteFlight(flightId, userId) {
+  // pass userId via query if needed
+  const qs = userId ? `?user_id=${userId}` : '';
+  return request(`/admin/flights/${flightId}${qs}`, { method: 'DELETE' });
+}
+
+export async function adminFlightDetails(flightId) {
+  return request(`/admin/flights/${flightId}/details`, { method: 'GET' });
+}
+
+export async function getSystemLogs(params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/systemlogs${qs ? `?${qs}` : ''}`, { method: 'GET' });
+}
+
 export default {
+  register,
   login,
   searchFlights,
   getAirports,
   createBooking,
   getUserTickets,
   processPayment,
+  cancelBooking,
+  adminListFlights,
+  adminCreateFlight,
+  adminUpdateFlight,
+  adminDeleteFlight,
+  adminFlightDetails,
+  getSystemLogs,
 };
 

@@ -20,7 +20,7 @@
 #include "cJSON.h"
 #include "common.h"
 
-#define SERVER_PORT 8080
+#define SERVER_PORT 8082
 #define DB_SERVICE_URL "http://127.0.0.1:5000"
 #define BUFFER_SIZE 65536
 #define MAX_CLIENTS 100
@@ -64,7 +64,7 @@ char *call_database_api(const char *method, const char *endpoint, const char *bo
     
     // Set timeout
     struct timeval tv;
-    tv.tv_sec = 5;
+    tv.tv_sec = 15;
     tv.tv_usec = 0;
     setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(sock_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -171,16 +171,50 @@ void handle_login(int client_fd, MessageHeader *header, void *payload) {
     free(response);
 }
 
+void handle_register(int client_fd, MessageHeader *header, void *payload) {
+    RegisterRequest *req = (RegisterRequest *)payload;
+    
+    // Build JSON request
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "username", req->username);
+    cJSON_AddStringToObject(json, "password", req->password);
+    cJSON_AddStringToObject(json, "full_name", req->full_name);
+    cJSON_AddStringToObject(json, "email", req->email);
+    cJSON_AddStringToObject(json, "phone", req->phone);
+    char *json_str = cJSON_PrintUnformatted(json);
+    printf("[Server] Register request: %s\n", json_str);
+    cJSON_Delete(json);
+    
+    // Call database API
+    char *response = call_database_api("POST", "/api/register", json_str);
+    free(json_str);
+    
+    if (!response) {
+        send_error_response(client_fd, MSG_REGISTER_RES, STATUS_INTERNAL_ERROR, "Database service unavailable");
+        return;
+    }
+    
+    // Send response back
+    MessageHeader res_header;
+    init_response_header(&res_header, MSG_REGISTER_RES, STATUS_SUCCESS, strlen(response), 0, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0);
+    send(client_fd, response, strlen(response), 0);
+    free(response);
+}
+
 void handle_search_flights(int client_fd, MessageHeader *header, void *payload) {
     SearchFlightsRequest *req = (SearchFlightsRequest *)payload;
     
     // Build query string
-    char endpoint[256];
-    snprintf(endpoint, sizeof(endpoint), "/api/flights?origin=%d&destination=%d",
-             req->origin_airport_id, req->destination_airport_id);
-    
-    // Call database API
-    char *response = call_database_api("GET", endpoint, NULL);
+    char path[1024];
+    snprintf(path, sizeof(path), 
+             "/api/flights?origin_id=%d&dest_id=%d&start_date=%s&end_date=%s&passengers=%d", 
+             req->origin_airport_id, 
+             req->destination_airport_id, 
+             req->start_date, 
+             req->end_date,
+             req->passenger_count);
+    char *response = call_database_api("GET", path, NULL);
     
     if (!response) {
         send_error_response(client_fd, MSG_SEARCH_FLIGHTS_RES, STATUS_INTERNAL_ERROR, "Database service unavailable");
@@ -258,6 +292,30 @@ void handle_payment(int client_fd, MessageHeader *header, void *payload) {
     free(response);
 }
 
+void handle_cancel_ticket(int client_fd, MessageHeader *header, void *payload) {
+    // Payload contains booking_id as JSON
+    cJSON *json = cJSON_Parse((char *)payload);
+    int booking_id = 0;
+    if (json) {
+        cJSON *bid = cJSON_GetObjectItem(json, "booking_id");
+        if (bid) booking_id = bid->valueint;
+        cJSON_Delete(json);
+    }
+
+    char endpoint[128];
+    snprintf(endpoint, sizeof(endpoint), "/api/bookings/%d/cancel", booking_id);
+    char *response = call_database_api("POST", endpoint, "{}");
+    if (!response) {
+        send_error_response(client_fd, MSG_CANCEL_TICKET_RES, STATUS_INTERNAL_ERROR, "Database service unavailable");
+        return;
+    }
+    MessageHeader res_header;
+    init_response_header(&res_header, MSG_CANCEL_TICKET_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0);
+    send(client_fd, response, strlen(response), 0);
+    free(response);
+}
+
 void handle_get_airports(int client_fd, MessageHeader *header) {
     char *response = call_database_api("GET", "/api/airports", NULL);
     
@@ -271,6 +329,85 @@ void handle_get_airports(int client_fd, MessageHeader *header) {
     send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0);
     send(client_fd, response, strlen(response), 0);
     free(response);
+}
+
+void handle_get_aircrafts(int client_fd, MessageHeader *header) {
+    char *response = call_database_api("GET", "/api/aircrafts", NULL);
+    if (!response) {
+        send_error_response(client_fd, MSG_GET_AIRCRAFTS_RES, STATUS_INTERNAL_ERROR, "Database service unavailable");
+        return;
+    }
+    MessageHeader res_header;
+    init_response_header(&res_header, MSG_GET_AIRCRAFTS_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0);
+    send(client_fd, response, strlen(response), 0);
+    free(response);
+}
+
+void handle_admin_list_flights(int client_fd, MessageHeader *header) {
+    char *response = call_database_api("GET", "/api/admin/flights", NULL);
+    if (!response) { send_error_response(client_fd, MSG_ADMIN_LIST_FLIGHTS_RES, STATUS_INTERNAL_ERROR, "Database service unavailable"); return; }
+    MessageHeader res_header; init_response_header(&res_header, MSG_ADMIN_LIST_FLIGHTS_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0); send(client_fd, response, strlen(response), 0); free(response);
+}
+
+void handle_admin_get_logs(int client_fd, MessageHeader *header, void *payload) {
+    cJSON *json = cJSON_Parse((char *)payload);
+    const char *query = NULL; if (json) { cJSON *q = cJSON_GetObjectItem(json, "query"); if (q && cJSON_IsString(q)) query = q->valuestring; }
+    char endpoint[256];
+    if (query && strlen(query) > 0) snprintf(endpoint, sizeof(endpoint), "/api/systemlogs?%s", query);
+    else snprintf(endpoint, sizeof(endpoint), "/api/systemlogs");
+    char *response = call_database_api("GET", endpoint, NULL);
+    if (json) cJSON_Delete(json);
+    if (!response) { send_error_response(client_fd, MSG_ADMIN_GET_LOGS_RES, STATUS_INTERNAL_ERROR, "Database service unavailable"); return; }
+    MessageHeader res_header; init_response_header(&res_header, MSG_ADMIN_GET_LOGS_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0); send(client_fd, response, strlen(response), 0); free(response);
+}
+void handle_admin_flight_details(int client_fd, MessageHeader *header, void *payload) {
+    cJSON *json = cJSON_Parse((char *)payload);
+    int flight_id = 0; if (json) { cJSON *fid = cJSON_GetObjectItem(json, "flight_id"); if (fid) flight_id = fid->valueint; }
+    char endpoint[128]; snprintf(endpoint, sizeof(endpoint), "/api/admin/flights/%d/details", flight_id);
+    char *response = call_database_api("GET", endpoint, NULL);
+    if (json) cJSON_Delete(json);
+    if (!response) { send_error_response(client_fd, MSG_ADMIN_FLIGHT_DETAILS_RES, STATUS_INTERNAL_ERROR, "Database service unavailable"); return; }
+    MessageHeader res_header; init_response_header(&res_header, MSG_ADMIN_FLIGHT_DETAILS_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0); send(client_fd, response, strlen(response), 0); free(response);
+}
+
+void handle_admin_add_flight(int client_fd, MessageHeader *header, void *payload) {
+    char *json_payload = (char *)payload;
+    char *response = call_database_api("POST", "/api/admin/flights", json_payload);
+    if (!response) { send_error_response(client_fd, MSG_ADMIN_ADD_FLIGHT_RES, STATUS_INTERNAL_ERROR, "Database service unavailable"); return; }
+    MessageHeader res_header; init_response_header(&res_header, MSG_ADMIN_ADD_FLIGHT_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0); send(client_fd, response, strlen(response), 0); free(response);
+}
+
+void handle_admin_update_flight(int client_fd, MessageHeader *header, void *payload) {
+    cJSON *json = cJSON_Parse((char *)payload);
+    int flight_id = 0; if (json) { cJSON *fid = cJSON_GetObjectItem(json, "flight_id"); if (fid) flight_id = fid->valueint; }
+    char endpoint[128]; snprintf(endpoint, sizeof(endpoint), "/api/admin/flights/%d", flight_id);
+    char *response = call_database_api("PUT", endpoint, (char *)payload);
+    if (json) cJSON_Delete(json);
+    if (!response) { send_error_response(client_fd, MSG_ADMIN_UPDATE_FLIGHT_RES, STATUS_INTERNAL_ERROR, "Database service unavailable"); return; }
+    MessageHeader res_header; init_response_header(&res_header, MSG_ADMIN_UPDATE_FLIGHT_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0); send(client_fd, response, strlen(response), 0); free(response);
+}
+
+void handle_admin_delete_flight(int client_fd, MessageHeader *header, void *payload) {
+    cJSON *json = cJSON_Parse((char *)payload);
+    int flight_id = 0; if (json) { cJSON *fid = cJSON_GetObjectItem(json, "flight_id"); if (fid) flight_id = fid->valueint; }
+    int user_id = 0; if (json) { cJSON *uid = cJSON_GetObjectItem(json, "user_id"); if (uid) user_id = uid->valueint; }
+    char endpoint[160];
+    if (user_id > 0) {
+        snprintf(endpoint, sizeof(endpoint), "/api/admin/flights/%d?user_id=%d", flight_id, user_id);
+    } else {
+        snprintf(endpoint, sizeof(endpoint), "/api/admin/flights/%d", flight_id);
+    }
+    char *response = call_database_api("DELETE", endpoint, NULL);
+    if (json) cJSON_Delete(json);
+    if (!response) { send_error_response(client_fd, MSG_ADMIN_DELETE_FLIGHT_RES, STATUS_INTERNAL_ERROR, "Database service unavailable"); return; }
+    MessageHeader res_header; init_response_header(&res_header, MSG_ADMIN_DELETE_FLIGHT_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0); send(client_fd, response, strlen(response), 0); free(response);
 }
 
 // ============================================================================
@@ -313,6 +450,9 @@ void *handle_client(void *arg) {
             case MSG_LOGIN_REQ:
                 handle_login(client_fd, &header, payload);
                 break;
+            case MSG_REGISTER_REQ:
+                handle_register(client_fd, &header, payload);
+                break;
             case MSG_SEARCH_FLIGHTS_REQ:
                 handle_search_flights(client_fd, &header, payload);
                 break;
@@ -325,8 +465,32 @@ void *handle_client(void *arg) {
             case MSG_PAYMENT_REQ:
                 handle_payment(client_fd, &header, payload);
                 break;
+            case MSG_CANCEL_TICKET_REQ:
+                handle_cancel_ticket(client_fd, &header, payload);
+                break;
             case MSG_GET_AIRPORTS_REQ:
                 handle_get_airports(client_fd, &header);
+                break;
+            case MSG_GET_AIRCRAFTS_REQ:
+                handle_get_aircrafts(client_fd, &header);
+                break;
+            case MSG_ADMIN_LIST_FLIGHTS_REQ:
+                handle_admin_list_flights(client_fd, &header);
+                break;
+            case MSG_ADMIN_ADD_FLIGHT_REQ:
+                handle_admin_add_flight(client_fd, &header, payload);
+                break;
+            case MSG_ADMIN_UPDATE_FLIGHT_REQ:
+                handle_admin_update_flight(client_fd, &header, payload);
+                break;
+            case MSG_ADMIN_DELETE_FLIGHT_REQ:
+                handle_admin_delete_flight(client_fd, &header, payload);
+                break;
+            case MSG_ADMIN_FLIGHT_DETAILS_REQ:
+                handle_admin_flight_details(client_fd, &header, payload);
+                break;
+            case MSG_ADMIN_GET_LOGS_REQ:
+                handle_admin_get_logs(client_fd, &header, payload);
                 break;
             default:
                 printf("[Server] Unknown message type: 0x%04X\n", header.message_type);

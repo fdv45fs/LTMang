@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { getUserTickets } from '@/lib/api';
+import { getUserTickets, cancelBooking } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -24,6 +24,13 @@ export default function HistoryPage() {
       setTickets(result.tickets);
     }
     setLoading(false);
+  };
+
+  const handleCancel = async (bookingId) => {
+    const res = await cancelBooking(bookingId);
+    if (res?.success) {
+      await loadTickets();
+    }
   };
 
   const formatPrice = (price) => {
@@ -77,6 +84,11 @@ export default function HistoryPage() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-xl font-bold text-sky-700">✈️ Vé của tôi</h1>
           <div className="flex items-center gap-4">
+            {user?.role === 'ADMIN' && (
+              <Button variant="ghost" size="sm" onClick={() => navigate('/admin/flights')}>
+                Quản lý chuyến bay
+              </Button>
+            )}
             <span className="text-gray-600">{user?.full_name}</span>
             <Button variant="outline" size="sm" onClick={() => navigate('/')}>
               Tìm chuyến bay
@@ -135,6 +147,14 @@ export default function HistoryPage() {
                         <div className="text-sm text-gray-500">Trạng thái chuyến bay</div>
                         {getStatusBadge(group.flight.status)}
                       </div>
+                      <div>
+                        <div className="text-sm text-gray-500">Thời gian đặt vé</div>
+                        <div className="font-medium">{formatDate(group.booking.booking_date)}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-500">Thời gian thanh toán</div>
+                        <div className="font-medium">{formatDate(group.booking.payment_date)}</div>
+                      </div>
                     </div>
                   </div>
 
@@ -164,6 +184,43 @@ export default function HistoryPage() {
                       ))}
                     </TableBody>
                   </Table>
+
+                  {group.booking.status === 'PENDING' && (
+                    <div className="mt-4 flex justify-end gap-3">
+                      {group.booking.status === 'PENDING' && (
+                        <Button
+                          className="bg-orange-500 hover:bg-orange-600"
+                          onClick={() =>
+                            navigate('/payments', {
+                              state: {
+                                booking: {
+                                  id: group.booking.id,
+                                  booking_reference: group.booking.booking_reference,
+                                  total_amount: group.booking.total_amount,
+                                  tickets: group.tickets.map(t => ({
+                                    passenger_name: t.passenger_name,
+                                    seat_number: t.seat_number,
+                                  })),
+                                },
+                                flight: group.flight,
+                              },
+                            })
+                          }
+                        >
+                          Thanh toán
+                        </Button>
+                      )}
+                      {group.booking.status !== 'CANCELLED' && (
+                        <Button
+                          variant="outline"
+                          className="border-red-300 text-red-600 hover:bg-red-50"
+                          onClick={() => handleCancel(group.booking.id)}
+                        >
+                          Hủy
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}

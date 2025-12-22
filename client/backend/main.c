@@ -21,7 +21,7 @@
 
 #define HTTP_PORT "3001"
 #define SERVER_HOST "127.0.0.1"
-#define SERVER_PORT 8080
+#define SERVER_PORT 8082
 #define BUFFER_SIZE 65536
 
 static int running = 1;
@@ -134,7 +134,7 @@ char *send_to_server(uint16_t msg_type, const void *payload, uint32_t payload_le
 
 void send_cors_headers(struct mg_connection *c) {
     mg_printf(c, "Access-Control-Allow-Origin: *\r\n");
-    mg_printf(c, "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
+    mg_printf(c, "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n");
     mg_printf(c, "Access-Control-Allow-Headers: Content-Type\r\n");
 }
 
@@ -192,22 +192,86 @@ void handle_login(struct mg_connection *c, struct mg_http_message *hm) {
     free(response);
 }
 
+// POST api/register
+void handle_register(struct mg_connection *c, struct mg_http_message *hm) {
+    printf("[Client] handle_register called, body_len=%zu\n", hm->body.len);
+    printf("[Client] Body content: %.*s\n", (int)hm->body.len, hm->body.buf);
+    fflush(stdout);
+    
+    // Forward JSON body directly to server
+    cJSON *json = cJSON_ParseWithLength(hm->body.buf, hm->body.len);
+    if (!json) {
+        printf("[Client] Invalid JSON body\n");
+        send_json_response(c, 400, "{\"success\":false,\"message\":\"Invalid JSON\"}");
+        return;
+    }
+    
+    cJSON *username = cJSON_GetObjectItem(json, "username");
+    cJSON *password = cJSON_GetObjectItem(json, "password");
+    cJSON *email = cJSON_GetObjectItem(json, "email");
+    cJSON *full_name = cJSON_GetObjectItem(json, "full_name");
+    cJSON *phone = cJSON_GetObjectItem(json, "phone");
+    if (!username || !password || !email) {
+        printf("[Client] Missing required fields\n");
+        cJSON_Delete(json);
+        send_json_response(c, 400, "{\"success\":false,\"message\":\"Missing required fields\"}");
+        return;
+    }
+
+    // Create register request
+    RegisterRequest req;
+    memset(&req, 0, sizeof(req));
+    strncpy(req.username, username->valuestring, sizeof(req.username) - 1);
+    strncpy(req.password, password->valuestring, sizeof(req.password) - 1);
+    if (full_name) {
+        strncpy(req.full_name, full_name->valuestring, sizeof(req.full_name) - 1);
+    }
+    if (email) {
+        strncpy(req.email, email->valuestring, sizeof(req.email) - 1);
+    }
+    if (phone) {
+        strncpy(req.phone, phone->valuestring, sizeof(req.phone) - 1);
+    }
+    cJSON_Delete(json);
+    
+    // Send to server
+    char *response = send_to_server(MSG_REGISTER_REQ, &req, sizeof(req), 0);
+    printf("[Client] Got response from server, sending to frontend\n");
+    send_json_response(c, 200, response);
+    free(response);
+}
+
 // GET /api/flights
 void handle_search_flights(struct mg_connection *c, struct mg_http_message *hm) {
     // Parse query params
-    char origin[16] = "0", destination[16] = "0";
-    mg_http_get_var(&hm->query, "origin", origin, sizeof(origin));
-    mg_http_get_var(&hm->query, "destination", destination, sizeof(destination));
-    
-    // Create SearchFlightsRequest
+    char origin_id_str[10] = "0";
+    char dest_id_str[10] = "0";
+    char start_date[12] = "";
+    char end_date[12] = "";
+    char passenger_str[10] = "1";
+
+    // 2. Lấy tham số từ Query String URL
+    // Ví dụ: /api/flights?origin_id=1&dest_id=2&start_date=2024-10-20&end_date=2024-10-25
+    mg_http_get_var(&hm->query, "origin_id", origin_id_str, sizeof(origin_id_str));
+    mg_http_get_var(&hm->query, "dest_id", dest_id_str, sizeof(dest_id_str));
+    mg_http_get_var(&hm->query, "start_date", start_date, sizeof(start_date));
+    mg_http_get_var(&hm->query, "end_date", end_date, sizeof(end_date));
+    mg_http_get_var(&hm->query, "passengers", passenger_str, sizeof(passenger_str));
+    mg_http_get_var(&hm->query, "passenger_count", passenger_str, sizeof(passenger_str)); // Hỗ trợ cả hai tên tham số
+
+    // 3. Đổ dữ liệu vào Struct
     SearchFlightsRequest req;
     memset(&req, 0, sizeof(req));
-    req.origin_airport_id = atoi(origin);
-    req.destination_airport_id = atoi(destination);
-    req.passenger_count = 1;
-    req.sort_by = SORT_BY_DEPARTURE;
     
-    // Send to server
+    req.origin_airport_id = atoi(origin_id_str);      // Chuyển chuỗi sang số int
+    req.destination_airport_id = atoi(dest_id_str);   // Chuyển chuỗi sang số int
+    req.passenger_count = atoi(passenger_str);
+    
+    // Copy ngày tháng
+    strncpy(req.start_date, start_date, sizeof(req.start_date) - 1);
+    strncpy(req.end_date, end_date, sizeof(req.end_date) - 1);
+
+    // 4. Gửi sang Server Backend
     char *response = send_to_server(MSG_SEARCH_FLIGHTS_REQ, &req, sizeof(req), 0);
     send_json_response(c, 200, response);
     free(response);
@@ -255,10 +319,126 @@ void handle_payment(struct mg_connection *c, struct mg_http_message *hm) {
     free(response);
 }
 
+// POST /api/bookings/cancel
+void handle_cancel_booking(struct mg_connection *c, struct mg_http_message *hm) {
+    char *body = malloc(hm->body.len + 1);
+    memcpy(body, hm->body.buf, hm->body.len);
+    body[hm->body.len] = '\0';
+    char *response = send_to_server(MSG_CANCEL_TICKET_REQ, body, strlen(body), 0);
+    send_json_response(c, 200, response);
+    free(body);
+    free(response);
+}
+
 // GET /api/airports
 void handle_get_airports(struct mg_connection *c, struct mg_http_message *hm) {
     char *response = send_to_server(MSG_GET_AIRPORTS_REQ, NULL, 0, 0);
     send_json_response(c, 200, response);
+    free(response);
+}
+
+// GET /api/aircrafts
+void handle_get_aircrafts(struct mg_connection *c, struct mg_http_message *hm) {
+    char *response = send_to_server(MSG_GET_AIRCRAFTS_REQ, NULL, 0, 0);
+    send_json_response(c, 200, response);
+    free(response);
+}
+
+// Admin: GET /api/systemlogs
+void handle_admin_get_logs(struct mg_connection *c, struct mg_http_message *hm) {
+    // Forward query string as-is via payload
+    char *payload = NULL;
+    if (hm->query.len > 0) {
+        cJSON *json = cJSON_CreateObject();
+        char *q = (char *)malloc(hm->query.len + 1);
+        memcpy(q, hm->query.buf, hm->query.len); q[hm->query.len] = '\0';
+        cJSON_AddStringToObject(json, "query", q);
+        payload = cJSON_PrintUnformatted(json);
+        free(q);
+        cJSON_Delete(json);
+    }
+    char *response = send_to_server(MSG_ADMIN_GET_LOGS_REQ, payload ? payload : NULL, payload ? strlen(payload) : 0, 0);
+    send_json_response(c, 200, response);
+    if (payload) free(payload);
+    free(response);
+}
+
+// Admin: GET /api/admin/flights
+void handle_admin_list_flights(struct mg_connection *c, struct mg_http_message *hm) {
+    char *response = send_to_server(MSG_ADMIN_LIST_FLIGHTS_REQ, NULL, 0, 0);
+    send_json_response(c, 200, response);
+    free(response);
+}
+
+// Admin: POST /api/admin/flights
+void handle_admin_create_flight(struct mg_connection *c, struct mg_http_message *hm) {
+    char *body = malloc(hm->body.len + 1);
+    memcpy(body, hm->body.buf, hm->body.len);
+    body[hm->body.len] = '\0';
+    char *response = send_to_server(MSG_ADMIN_ADD_FLIGHT_REQ, body, strlen(body), 0);
+    send_json_response(c, 200, response);
+    free(body);
+    free(response);
+}
+
+static int parse_flight_id_from_uri(struct mg_http_message *hm) {
+    char path[256];
+    int len = (int)(hm->uri.len < sizeof(path) - 1 ? hm->uri.len : sizeof(path) - 1);
+    memcpy(path, hm->uri.buf, len);
+    path[len] = '\0';
+    int id = 0;
+    if (sscanf(path, "/api/admin/flights/%d", &id) == 1) return id;
+    return 0;
+}
+
+// Admin: GET /api/admin/flights/{id}/details
+void handle_admin_flight_details(struct mg_connection *c, struct mg_http_message *hm) {
+    int id = parse_flight_id_from_uri(hm);
+    if (id <= 0) { send_json_response(c, 400, "{\"success\":false,\"message\":\"Invalid path\"}"); return; }
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "flight_id", id);
+    char *payload = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    char *response = send_to_server(MSG_ADMIN_FLIGHT_DETAILS_REQ, payload, strlen(payload), 0);
+    send_json_response(c, 200, response);
+    free(payload);
+    free(response);
+}
+
+// Admin: PUT /api/admin/flights/{id}
+void handle_admin_update_flight(struct mg_connection *c, struct mg_http_message *hm) {
+    int id = parse_flight_id_from_uri(hm);
+    if (id <= 0) { send_json_response(c, 400, "{\"success\":false,\"message\":\"Invalid path\"}"); return; }
+
+    cJSON *json = cJSON_ParseWithLength(hm->body.buf, hm->body.len);
+    if (!json) { send_json_response(c, 400, "{\"success\":false,\"message\":\"Invalid JSON\"}"); return; }
+    cJSON_AddNumberToObject(json, "flight_id", id);
+    char *payload = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    char *response = send_to_server(MSG_ADMIN_UPDATE_FLIGHT_REQ, payload, strlen(payload), 0);
+    send_json_response(c, 200, response);
+    free(payload);
+    free(response);
+}
+
+// Admin: DELETE /api/admin/flights/{id}
+void handle_admin_delete_flight(struct mg_connection *c, struct mg_http_message *hm) {
+    int id = parse_flight_id_from_uri(hm);
+    if (id <= 0) { send_json_response(c, 400, "{\"success\":false,\"message\":\"Invalid path\"}"); return; }
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "flight_id", id);
+    // Include user_id from query if provided for auditing
+    char user_buf[32];
+    int ulen = mg_http_get_var(&hm->query, "user_id", user_buf, sizeof(user_buf));
+    if (ulen > 0) {
+        int uid = atoi(user_buf);
+        if (uid > 0) cJSON_AddNumberToObject(json, "user_id", uid);
+    }
+    char *payload = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    char *response = send_to_server(MSG_ADMIN_DELETE_FLIGHT_REQ, payload, strlen(payload), 0);
+    send_json_response(c, 200, response);
+    free(payload);
     free(response);
 }
 
@@ -295,6 +475,10 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data) {
             mg_strcmp(hm->method, mg_str("POST")) == 0) {
             handle_login(c, hm);
         }
+        else if (mg_match(hm->uri, mg_str("/api/register"), NULL) && 
+                 mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            handle_register(c, hm);
+        }
         else if (mg_match(hm->uri, mg_str("/api/flights"), NULL) && 
                  mg_strcmp(hm->method, mg_str("GET")) == 0) {
             handle_search_flights(c, hm);
@@ -311,9 +495,41 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data) {
                  mg_strcmp(hm->method, mg_str("POST")) == 0) {
             handle_payment(c, hm);
         }
+        else if (mg_match(hm->uri, mg_str("/api/bookings/cancel"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            handle_cancel_booking(c, hm);
+        }
         else if (mg_match(hm->uri, mg_str("/api/airports"), NULL) && 
                  mg_strcmp(hm->method, mg_str("GET")) == 0) {
             handle_get_airports(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/aircrafts"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            handle_get_aircrafts(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/systemlogs"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            handle_admin_get_logs(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/admin/flights"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            handle_admin_list_flights(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/admin/flights"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            handle_admin_create_flight(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/admin/flights/*"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+            handle_admin_update_flight(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/admin/flights/*/details"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            handle_admin_flight_details(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/admin/flights/*"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+            handle_admin_delete_flight(c, hm);
         }
         else if (mg_match(hm->uri, mg_str("/health"), NULL)) {
             send_json_response(c, 200, "{\"status\":\"ok\"}");
@@ -359,6 +575,7 @@ int main() {
     printf("  POST /api/bookings\n");
     printf("  GET  /api/tickets?user_id=X\n");
     printf("  POST /api/payments\n");
+    printf("  POST /api/bookings/cancel\n");
     printf("==================================================\n");
     printf("Press Ctrl+C to stop\n\n");
     
