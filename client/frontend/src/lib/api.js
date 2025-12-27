@@ -47,13 +47,14 @@ export async function login(username, password) {
 // FLIGHTS API
 // ============================================================================
 
-export async function searchFlights(originId, destId, startDate, endDate, passengers) { 
+export async function searchFlights(originId, destId, startDate, endDate, passengers, classType) { 
   const params = new URLSearchParams({
       origin_id: originId,
       dest_id: destId,
       start_date: startDate || '',
       end_date: endDate || '',
-      passengers: passengers || 1
+      passengers: passengers || 1,
+      class_type: classType || ''
   });
   return request(`/flights?${params.toString()}`, { method: 'GET' });
 }
@@ -88,6 +89,13 @@ export async function createBooking(userId, flightId, classType, passengers) {
 
 export async function getUserTickets(userId) {
   return request(`/tickets?user_id=${userId}`);
+}
+
+export async function sendTicketEmail(bookingId, email) {
+  return request('/tickets/send_email', {
+    method: 'POST',
+    body: JSON.stringify({ booking_id: bookingId, email }),
+  });
 }
 
 // ============================================================================
@@ -155,6 +163,7 @@ export default {
   getAirports,
   createBooking,
   getUserTickets,
+  sendTicketEmail,
   processPayment,
   cancelBooking,
   adminListFlights,

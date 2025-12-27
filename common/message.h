@@ -38,6 +38,8 @@ typedef enum {
     MSG_CANCEL_TICKET_REQ   = 0x0207,   // UC09: Hủy vé
     MSG_CANCEL_TICKET_RES   = 0x0287,
     MSG_NOTIFICATION_PUSH   = 0x0208,   // UC10: Thông báo (server push)
+    MSG_SEND_TICKET_EMAIL_REQ = 0x0209, // UC08: Gửi mã vé qua Email
+    MSG_SEND_TICKET_EMAIL_RES = 0x0289,
 
     // Group 03: Admin Operations (UC11-13)
     MSG_ADMIN_ADD_FLIGHT_REQ    = 0x0301,   // UC11: Thêm chuyến bay

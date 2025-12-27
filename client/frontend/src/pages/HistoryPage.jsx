@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { getUserTickets, cancelBooking } from '@/lib/api';
+import { getUserTickets, cancelBooking, sendTicketEmail } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -9,13 +9,29 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 export default function HistoryPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeBookingId, setActiveBookingId] = useState(null);
+  const [emailById, setEmailById] = useState({});
+  const [sendingId, setSendingId] = useState(null);
+  const [resultById, setResultById] = useState({});
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     loadTickets();
   }, []);
+
+  // Detect VNPay success redirect and pre-open email form
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const payStatus = sp.get('payment');
+    const bid = sp.get('booking_id');
+    if (payStatus === 'success' && bid) {
+      setActiveBookingId(Number(bid));
+    }
+  }, [location.search]);
 
   const loadTickets = async () => {
     setLoading(true);
@@ -77,6 +93,39 @@ export default function HistoryPage() {
     return acc;
   }, {});
 
+  // Sort groups by booking date (most recent first)
+  const groups = Object.values(groupedByBooking).sort((a, b) => {
+    const ta = a.booking?.booking_date ? new Date(a.booking.booking_date).getTime() : 0;
+    const tb = b.booking?.booking_date ? new Date(b.booking.booking_date).getTime() : 0;
+    return tb - ta;
+  });
+
+  const handleSendEmail = async (bookingId) => {
+    const email = (emailById[bookingId] || '').trim();
+    if (!email) {
+      setResultById(prev => ({ ...prev, [bookingId]: { ok: false, msg: 'Vui lòng nhập Gmail' } }));
+      return;
+    }
+    setSendingId(bookingId);
+    const res = await sendTicketEmail(bookingId, email);
+    setSendingId(null);
+    if (res?.success) {
+      setResultById(prev => ({ ...prev, [bookingId]: { ok: true, msg: 'Đã gửi mã vé vào Gmail' } }));
+      setNotice(`Đã gửi mã vé vào Gmail: ${email}`);
+      // Reload to reflect email_sent status and auto-hide form
+      await loadTickets();
+    } else {
+      const msg = res?.message || 'Gửi email thất bại';
+      // If server indicates already sent, show green notice and hide input
+      if (/đã được gửi/i.test(msg)) {
+        setResultById(prev => ({ ...prev, [bookingId]: { ok: true, msg } }));
+        setNotice(msg);
+      } else {
+        setResultById(prev => ({ ...prev, [bookingId]: { ok: false, msg } }));
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 to-blue-100">
       {/* Header */}
@@ -98,6 +147,11 @@ export default function HistoryPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {notice && (
+          <div className="mb-4 p-3 rounded bg-green-100 text-green-700">
+            {notice}
+          </div>
+        )}
         {loading ? (
           <div className="text-center py-12">Đang tải...</div>
         ) : tickets.length === 0 ? (
@@ -112,7 +166,7 @@ export default function HistoryPage() {
           <div className="space-y-6">
             <p className="text-gray-600">Tổng cộng: {tickets.length} vé</p>
             
-            {Object.values(groupedByBooking).map((group) => (
+            {groups.map((group) => (
               <Card key={group.booking.booking_reference}>
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start">
@@ -155,6 +209,12 @@ export default function HistoryPage() {
                         <div className="text-sm text-gray-500">Thời gian thanh toán</div>
                         <div className="font-medium">{formatDate(group.booking.payment_date)}</div>
                       </div>
+                      {group.booking.email_sent_at && (
+                        <div>
+                          <div className="text-sm text-gray-500">Trạng thái gửi mã vé</div>
+                          <div className="font-medium text-green-700">Đã gửi mã vé vào Gmail: {group.booking.email_sent_to}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -218,6 +278,32 @@ export default function HistoryPage() {
                         >
                           Hủy
                         </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {group.booking.status === 'CONFIRMED' && !group.booking.email_sent_at && !(resultById[group.booking.id]?.ok) && (
+                    <div className="mt-4 p-3 border rounded-lg bg-white">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="email"
+                          className="flex-1 border rounded px-3 py-2"
+                          placeholder="Nhập Gmail để nhận mã vé"
+                          value={emailById[group.booking.id] || ''}
+                          onChange={(e) => setEmailById(prev => ({ ...prev, [group.booking.id]: e.target.value }))}
+                        />
+                        <Button
+                          className="bg-sky-600 hover:bg-sky-700"
+                          disabled={sendingId === group.booking.id}
+                          onClick={() => handleSendEmail(group.booking.id)}
+                        >
+                          {sendingId === group.booking.id ? 'Đang gửi...' : ' Gửi mã vé vào Gmail'}
+                        </Button>
+                      </div>
+                      {resultById[group.booking.id] && (
+                        <div className={`mt-2 text-sm ${resultById[group.booking.id].ok ? 'text-green-600' : 'text-red-600'}`}>
+                          {resultById[group.booking.id].msg}
+                        </div>
                       )}
                     </div>
                   )}

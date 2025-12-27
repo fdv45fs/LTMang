@@ -15,7 +15,7 @@ export default function BookingPage() {
   
   const flight = location.state?.flight || location.state?.booking?.flight;
   
-  const [classType, setClassType] = useState('ECONOMY');
+  const [classType, setClassType] = useState(location.state?.defaultClass || 'ECONOMY');
   const [passengerCount, setPassengerCount] = useState(1);
   const [passengers, setPassengers] = useState([{ name: user?.full_name || '', ic_number: '' }]);
   const [loading, setLoading] = useState(false);

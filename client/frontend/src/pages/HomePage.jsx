@@ -25,6 +25,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [passengers, setPassengers] = useState(1);
+  const [classType, setClassType] = useState('ALL');
 
   useEffect(() => {
     loadAirports();
@@ -47,7 +48,8 @@ export default function HomePage() {
       destination ? parseInt(destination) : 0,
       startDate,
       endDate,
-      passengers
+      passengers,
+      classType === 'ALL' ? '' : classType
     );
     
     if (result.success) {
@@ -73,7 +75,7 @@ export default function HomePage() {
   };
 
   const handleBook = (flight) => {
-    navigate('/booking', { state: { flight } });
+    navigate('/booking', { state: { flight, defaultClass: classType === 'ALL' ? 'ECONOMY' : classType } });
   };
 
   // Admin-only: inline flight details
@@ -126,7 +128,7 @@ export default function HomePage() {
             <CardTitle className="text-sky-800">Tìm chuyến bay</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
               {/* Điểm đi */}
               <div className="space-y-2">
                 <Label>Điểm đi</Label>
@@ -193,6 +195,20 @@ export default function HomePage() {
                     value={passengers} 
                     onChange={(e) => setPassengers(e.target.value)} 
                 />
+              </div>
+              {/* Hạng ghế */}
+              <div className="space-y-2">
+                <Label>Hạng ghế</Label>
+                <Select value={classType} onValueChange={setClassType}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Chọn hạng ghế" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">Tất cả</SelectItem>
+                    <SelectItem value="ECONOMY">Phổ thông</SelectItem>
+                    <SelectItem value="BUSINESS">Thương gia</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               {/* Nút tìm kiếm */}
               <div>
@@ -269,25 +285,38 @@ export default function HomePage() {
                       <div className="hidden md:block w-[1px] h-24 bg-gray-200 mx-4"></div>
 
                       {/* Price & Book */}
-                      <div className="text-right min-w-[150px]">
+                      <div className="text-right min-w-[180px]">
                         <div className="mb-3">
-                          <div className="text-sm text-gray-500">Phổ thông từ</div>
+                          <div className="text-sm text-gray-500">
+                            {classType === 'BUSINESS' ? 'Thương gia từ' : 'Phổ thông từ'}
+                          </div>
                           <div className="text-2xl font-bold text-orange-600">
-                            {formatPrice(flight.economy_price)}
+                            {classType === 'BUSINESS' ? formatPrice(flight.business_price) : formatPrice(flight.economy_price)}
                           </div>
                           <div className="text-xs text-gray-400 mt-1">
-                            {((flight.economy_available || 0) + (flight.business_available || 0)) > 0
-                              ? `Tổng còn ${(flight.economy_available || 0) + (flight.business_available || 0)} ghế`
-                              : <span className="text-red-500">Hết vé</span>}
+                            {(() => {
+                              const eco = flight.economy_available || 0;
+                              const bus = flight.business_available || 0;
+                              if (classType === 'ECONOMY') return eco > 0 ? `Còn ${eco} ghế phổ thông` : <span className="text-red-500">Hết vé phổ thông</span>;
+                              if (classType === 'BUSINESS') return bus > 0 ? `Còn ${bus} ghế thương gia` : <span className="text-red-500">Hết vé thương gia</span>;
+                              const total = eco + bus;
+                              return total > 0 ? `Tổng còn ${total} ghế` : <span className="text-red-500">Hết vé</span>;
+                            })()}
                           </div>
                         </div>
                         {user?.role !== 'ADMIN' ? (
                           <Button 
                             onClick={() => handleBook(flight)}
-                            disabled={((flight.economy_available || 0) + (flight.business_available || 0)) < Number(passengers)}
+                            disabled={(() => {
+                              const eco = flight.economy_available || 0;
+                              const bus = flight.business_available || 0;
+                              if (classType === 'ECONOMY') return eco < Number(passengers);
+                              if (classType === 'BUSINESS') return bus < Number(passengers);
+                              return (eco + bus) < Number(passengers);
+                            })()}
                             className="w-full bg-orange-500 hover:bg-orange-600"
                           >
-                            Chọn vé
+                            {classType === 'BUSINESS' ? 'Chọn vé (Thương gia)' : classType === 'ECONOMY' ? 'Chọn vé (Phổ thông)' : 'Chọn vé'}
                           </Button>
                         ) : (
                           <Button onClick={() => showDetails(flight.id)} className="w-full">Xem chi tiết</Button>

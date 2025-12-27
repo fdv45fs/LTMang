@@ -292,6 +292,20 @@ void handle_payment(int client_fd, MessageHeader *header, void *payload) {
     free(response);
 }
 
+void handle_send_ticket_email(int client_fd, MessageHeader *header, void *payload) {
+    // Payload is JSON: { booking_id, email }
+    char *json_payload = (char *)payload;
+    char *response = call_database_api("POST", "/api/tickets/send_email", json_payload);
+    if (!response) {
+        send_error_response(client_fd, MSG_SEND_TICKET_EMAIL_RES, STATUS_INTERNAL_ERROR, "Database service unavailable");
+        return;
+    }
+    MessageHeader res_header; init_response_header(&res_header, MSG_SEND_TICKET_EMAIL_RES, STATUS_SUCCESS, strlen(response), header->session_id, header->request_id);
+    send(client_fd, &res_header, MESSAGE_HEADER_SIZE, 0);
+    send(client_fd, response, strlen(response), 0);
+    free(response);
+}
+
 void handle_cancel_ticket(int client_fd, MessageHeader *header, void *payload) {
     // Payload contains booking_id as JSON
     cJSON *json = cJSON_Parse((char *)payload);
@@ -467,6 +481,9 @@ void *handle_client(void *arg) {
                 break;
             case MSG_CANCEL_TICKET_REQ:
                 handle_cancel_ticket(client_fd, &header, payload);
+                break;
+            case MSG_SEND_TICKET_EMAIL_REQ:
+                handle_send_ticket_email(client_fd, &header, payload);
                 break;
             case MSG_GET_AIRPORTS_REQ:
                 handle_get_airports(client_fd, &header);

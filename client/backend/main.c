@@ -330,6 +330,17 @@ void handle_cancel_booking(struct mg_connection *c, struct mg_http_message *hm) 
     free(response);
 }
 
+// POST /api/tickets/send_email
+void handle_send_ticket_email(struct mg_connection *c, struct mg_http_message *hm) {
+    char *body = malloc(hm->body.len + 1);
+    memcpy(body, hm->body.buf, hm->body.len);
+    body[hm->body.len] = '\0';
+    char *response = send_to_server(MSG_SEND_TICKET_EMAIL_REQ, body, strlen(body), 0);
+    send_json_response(c, 200, response);
+    free(body);
+    free(response);
+}
+
 // GET /api/airports
 void handle_get_airports(struct mg_connection *c, struct mg_http_message *hm) {
     char *response = send_to_server(MSG_GET_AIRPORTS_REQ, NULL, 0, 0);
@@ -499,6 +510,10 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data) {
                  mg_strcmp(hm->method, mg_str("POST")) == 0) {
             handle_cancel_booking(c, hm);
         }
+        else if (mg_match(hm->uri, mg_str("/api/tickets/send_email"), NULL) &&
+                 mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            handle_send_ticket_email(c, hm);
+        }
         else if (mg_match(hm->uri, mg_str("/api/airports"), NULL) && 
                  mg_strcmp(hm->method, mg_str("GET")) == 0) {
             handle_get_airports(c, hm);
@@ -576,6 +591,7 @@ int main() {
     printf("  GET  /api/tickets?user_id=X\n");
     printf("  POST /api/payments\n");
     printf("  POST /api/bookings/cancel\n");
+    printf("  POST /api/tickets/send_email\n");
     printf("==================================================\n");
     printf("Press Ctrl+C to stop\n\n");
     

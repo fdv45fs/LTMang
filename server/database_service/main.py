@@ -15,6 +15,7 @@ from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+import re
 
 # Load environment variables
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
@@ -153,7 +154,9 @@ def register():
     
     password_hash = hash_password(password)
     
-    with get_db() as conn:
+    # Use explicit transaction so updates are committed
+    from sqlalchemy import exc
+    with engine.begin() as conn:
         # Check if username or email already exists
         existing = conn.execute(
             text("SELECT id FROM Users WHERE username = :username OR email = :email"),
@@ -232,6 +235,8 @@ def search_flights():
 
     start_date = request.args.get('start_date') 
     end_date = request.args.get('end_date')     
+    # Filter by class type: 'ECONOMY' or 'BUSINESS'
+    class_type = request.args.get('class_type')
 
     # Lấy số lượng hành khách, mặc định là 1 nếu không truyền (hỗ trợ cả passengers/passenger_count)
     min_passengers = request.args.get('passengers', type=int)
@@ -278,18 +283,27 @@ def search_flights():
             query += " AND DATE(f.departure_time) <= :end_date"
             params['end_date'] = end_date
         
-        # Logic lọc số lượng ghế: tổng ghế ECONOMY + BUSINESS phải >= min_passengers
-        query += """
-            AND (
-                COALESCE((SELECT total_seats - booked_seats 
-                          FROM FlightClasses 
-                          WHERE flight_id = f.id AND class_type = 'ECONOMY'), 0)
-              + COALESCE((SELECT total_seats - booked_seats 
-                          FROM FlightClasses 
-                          WHERE flight_id = f.id AND class_type = 'BUSINESS'), 0)
-            ) >= :min_passengers
-        """
-        params['min_passengers'] = min_passengers
+        # Logic lọc số lượng ghế: theo hạng ghế nếu có, ngược lại tổng ECONOMY+BUSINESS
+        if class_type in ('ECONOMY', 'BUSINESS'):
+            query += """
+                AND COALESCE((SELECT total_seats - booked_seats 
+                              FROM FlightClasses 
+                              WHERE flight_id = f.id AND class_type = :class_type), 0) >= :min_passengers
+            """
+            params['class_type'] = class_type
+            params['min_passengers'] = min_passengers
+        else:
+            query += """
+                AND (
+                    COALESCE((SELECT total_seats - booked_seats 
+                              FROM FlightClasses 
+                              WHERE flight_id = f.id AND class_type = 'ECONOMY'), 0)
+                  + COALESCE((SELECT total_seats - booked_seats 
+                              FROM FlightClasses 
+                              WHERE flight_id = f.id AND class_type = 'BUSINESS'), 0)
+                ) >= :min_passengers
+            """
+            params['min_passengers'] = min_passengers
         
         query += " ORDER BY f.departure_time"
         
@@ -325,7 +339,7 @@ def search_flights():
         # Optional user_id for logging
         uid = request.args.get('user_id', type=int)
         # Log search action (do_commit=True since standalone)
-        write_system_log(conn, uid if uid else None, 'SEARCH', f"origin={origin or 0}, dest={destination or 0}, start={start_date or ''}, end={end_date or ''}, pax={min_passengers}, results={len(flights)}", do_commit=True)
+        write_system_log(conn, uid if uid else None, 'SEARCH', f"origin={origin or 0}, dest={destination or 0}, start={start_date or ''}, end={end_date or ''}, class={class_type or 'ALL'}, pax={min_passengers}, results={len(flights)}", do_commit=True)
         return jsonify({'success': True, 'flights': flights, 'count': len(flights)})
         
 @app.route('/api/flights/<int:flight_id>', methods=['GET'])
@@ -534,7 +548,11 @@ def process_payment():
     Otherwise, fall back to simulated success.
     """
     data = request.get_json(silent=True) or {}
-    booking_id = data.get('booking_id')
+    # Ensure numeric booking_id
+    try:
+        booking_id = int(data.get('booking_id') or 0)
+    except Exception:
+        booking_id = 0
     payment_method = data.get('payment_method', 'CARD')
     if not booking_id:
         return jsonify({'success': False, 'message': 'Thiếu booking_id'}), 400
@@ -714,8 +732,8 @@ def vnpay_return():
                 write_system_log(conn, int(booking[1]) if booking and booking[1] is not None else None, 'PAYMENT', f"booking_id={booking_id}, txn={transaction_no}, amount={float(amount)}", do_commit=False)
                 trans.commit()
 
-                # Redirect user back to frontend history
-                target = f"{FRONTEND_BASE_URL}/history"
+                # Redirect user back to frontend history with booking context
+                target = f"{FRONTEND_BASE_URL}/history?payment=success&booking_id={booking_id}"
                 html = f"<html><head><meta http='refresh' content='0;url={target}' /></head><body>Thanh toán thành công. Redirect...</body></html>"
                 return redirect(target)
             else:
@@ -748,7 +766,9 @@ def get_user_tickets(user_id):
                     d.code as dest_code, d.name as dest_name,
                     b.id as booking_id, b.booking_reference, b.status as booking_status, b.total_amount,
                     b.booking_date,
-                    (SELECT MAX(p.transaction_date) FROM Payments p WHERE p.booking_id = b.id) AS payment_date
+                    (SELECT MAX(p.transaction_date) FROM Payments p WHERE p.booking_id = b.id) AS payment_date,
+                    b.email_sent_to,
+                    b.email_sent_at
                 FROM Tickets t
                 JOIN Bookings b ON t.booking_id = b.id
                 JOIN FlightSeats fs ON t.flight_seat_id = fs.id
@@ -757,7 +777,7 @@ def get_user_tickets(user_id):
                 JOIN Airports o ON f.origin_airport_id = o.id
                 JOIN Airports d ON f.destination_airport_id = d.id
                 WHERE b.user_id = :user_id
-                ORDER BY f.departure_time DESC
+                ORDER BY b.booking_date DESC
             """),
             {'user_id': user_id}
         ).fetchall()
@@ -790,13 +810,169 @@ def get_user_tickets(user_id):
                     'status': row[19],
                     'total_amount': float(row[20]) if row[20] else 0,
                     'booking_date': row[21].isoformat() if row[21] else None,
-                    'payment_date': row[22].isoformat() if row[22] else None
+                    'payment_date': row[22].isoformat() if row[22] else None,
+                    'email_sent_to': row[23],
+                    'email_sent_at': row[24].isoformat() if row[24] else None
                 }
             })
         
         # Log tickets listing
         write_system_log(conn, int(user_id), 'LIST_TICKETS', f"count={len(tickets)}", do_commit=True)
         return jsonify({'success': True, 'tickets': tickets, 'count': len(tickets)})
+
+@app.route('/api/tickets/send_email', methods=['POST'])
+def send_ticket_email():
+    """Send e-ticket codes to a specified email for a booking.
+
+    Body: { booking_id: int, email: str }
+    Requires SMTP settings via environment:
+      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL
+    """
+    data = request.get_json(silent=True) or {}
+    booking_id = data.get('booking_id')
+    email = (data.get('email') or '').strip()
+
+    if not booking_id or not email:
+        return jsonify({'success': False, 'message': 'Thiếu booking_id hoặc email'}), 400
+
+    # Basic email format check
+    if '@' not in email or '.' not in email:
+        return jsonify({'success': False, 'message': 'Email không hợp lệ'}), 400
+
+    with get_db() as conn:
+        # Ensure Bookings has email tracking columns (Postgres only)
+        try:
+            conn.execute(text("""
+                ALTER TABLE Bookings
+                ADD COLUMN IF NOT EXISTS email_sent_to VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS email_sent_at TIMESTAMP
+            """))
+        except Exception:
+            pass
+
+        # Block re-sending if already sent (via columns or logs fallback)
+        try:
+            existing = conn.execute(text(
+                "SELECT email_sent_at, email_sent_to FROM Bookings WHERE id = :bid"
+            ), {'bid': booking_id}).fetchone()
+        except Exception:
+            existing = None
+        if existing and existing[0] is not None:
+            return jsonify({'success': False, 'message': f"Mã vé đã được gửi đến {existing[1]}"}), 409
+        # Fallback: check logs for a prior success send
+        log_row = conn.execute(text(
+            """
+            SELECT details, timestamp FROM SystemLogs
+            WHERE action_type = 'SEND_TICKET_EMAIL'
+              AND details LIKE :pat
+              AND details LIKE '%success=True%'
+            ORDER BY id DESC LIMIT 1
+            """
+        ), {'pat': f"booking_id={booking_id}%"}).fetchone()
+        if log_row:
+            det = log_row[0] or ''
+            m = re.search(r'to=([^,]+)', det)
+            sent_to = m.group(1).strip() if m else ''
+            return jsonify({'success': False, 'message': f"Mã vé đã được gửi đến {sent_to}"}), 409
+        # Fetch booking and tickets data
+        rows = conn.execute(text(
+            """
+            SELECT 
+                b.id AS booking_id, b.booking_reference, b.total_amount,
+                u.full_name, u.email AS user_email,
+                f.flight_code, o.code AS origin_code, d.code AS dest_code,
+                t.ticket_number, t.passenger_name, fs.seat_number, fc.class_type,
+                COALESCE((SELECT MAX(p.transaction_date) FROM Payments p WHERE p.booking_id = b.id), NOW()) AS payment_date
+            FROM Bookings b
+            JOIN Users u ON b.user_id = u.id
+            JOIN Tickets t ON t.booking_id = b.id
+            JOIN FlightSeats fs ON t.flight_seat_id = fs.id
+            JOIN FlightClasses fc ON fs.class_type_id = fc.id
+            JOIN Flights f ON fc.flight_id = f.id
+            JOIN Airports o ON f.origin_airport_id = o.id
+            JOIN Airports d ON f.destination_airport_id = d.id
+            WHERE b.id = :bid
+            ORDER BY t.id
+            """
+        ), {'bid': booking_id}).fetchall()
+
+        if not rows:
+            return jsonify({'success': False, 'message': 'Không tìm thấy vé cho booking này'}), 404
+
+        # Build email content
+        first = rows[0]
+        subject = f"E-ticket cho Booking {first[1]} - Chuyến {first[5]} ({first[6]}→{first[7]})"
+        lines = []
+        lines.append(f"Xin chào {first[3]},")
+        lines.append("")
+        lines.append(f"Cảm ơn bạn đã thanh toán. Dưới đây là mã vé điện tử cho booking {first[1]}:")
+        lines.append("")
+        for r in rows:
+            ticket_number = r[8]
+            passenger_name = r[9]
+            seat_number = r[10]
+            class_type = r[11]
+            lines.append(f"- {passenger_name} | Vé: {ticket_number} | Ghế: {seat_number} | Hạng: {class_type}")
+        lines.append("")
+        lines.append(f"Chuyến bay: {first[5]} ({first[6]}→{first[7]})")
+        lines.append(f"Tổng tiền: {float(first[2]):.0f} VND")
+        lines.append(f"Ngày thanh toán: {first[12].isoformat() if first[12] else ''}")
+        lines.append("")
+        lines.append("Chúc bạn có chuyến bay tốt đẹp!")
+        body_text = "\n".join(lines)
+
+        # Attempt SMTP send
+        SMTP_HOST = os.getenv('SMTP_HOST')
+        SMTP_PORT = int(os.getenv('SMTP_PORT') or '587')
+        SMTP_USER = os.getenv('SMTP_USER')
+        SMTP_PASS = os.getenv('SMTP_PASS')
+        FROM_EMAIL = os.getenv('FROM_EMAIL') or (SMTP_USER or 'no-reply@example.com')
+
+        sent = False
+        error_msg = None
+        try:
+            if SMTP_HOST and SMTP_USER and SMTP_PASS:
+                import smtplib
+                from email.message import EmailMessage
+                msg = EmailMessage()
+                msg['Subject'] = subject
+                msg['From'] = FROM_EMAIL
+                msg['To'] = email
+                msg.set_content(body_text)
+
+                with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+                    s.starttls()
+                    s.login(SMTP_USER, SMTP_PASS)
+                    s.send_message(msg)
+                sent = True
+            else:
+                error_msg = 'Chưa cấu hình SMTP. Vui lòng thiết lập SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL trong .env'
+        except Exception as e:
+            error_msg = str(e)
+
+        if sent:
+            # Persist email sent info and then log
+            try:
+                conn.execute(text("""
+                    UPDATE Bookings SET email_sent_to = :email, email_sent_at = NOW()
+                    WHERE id = :bid
+                """), {'email': email, 'bid': booking_id})
+            except Exception as e:
+                print(f"[EmailUpdate] Failed to update booking {booking_id}: {e}")
+            try:
+                uid = conn.execute(text("SELECT user_id FROM Bookings WHERE id = :bid"), {'bid': booking_id}).scalar()
+                write_system_log(conn, int(uid) if uid is not None else None, 'SEND_TICKET_EMAIL', f"booking_id={booking_id}, to={email}, success=True", do_commit=True)
+            except Exception:
+                pass
+            return jsonify({'success': True, 'message': 'Đã gửi email mã vé'}), 200
+        else:
+            # Log failure
+            try:
+                uid = conn.execute(text("SELECT user_id FROM Bookings WHERE id = :bid"), {'bid': booking_id}).scalar()
+                write_system_log(conn, int(uid) if uid is not None else None, 'SEND_TICKET_EMAIL', f"booking_id={booking_id}, to={email}, success=False, error={error_msg or ''}", do_commit=True)
+            except Exception:
+                pass
+            return jsonify({'success': False, 'message': error_msg or 'Gửi email thất bại'}), 500
 
 # ============================================================================
 # SYSTEM LOGS ENDPOINTS (Admin)
