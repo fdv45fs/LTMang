@@ -81,11 +81,26 @@ export default function HomePage() {
   // Admin-only: inline flight details
   const [openDetails, setOpenDetails] = useState(false);
   const [details, setDetails] = useState(null);
+  const [compareSelected, setCompareSelected] = useState([]);
+  const [openCompare, setOpenCompare] = useState(false);
   const showDetails = async (flightId) => {
     setDetails(null);
     setOpenDetails(true);
     const res = await adminFlightDetails(flightId);
     if (res?.success) setDetails(res);
+  };
+
+  const toggleCompare = (flight) => {
+    setCompareSelected((prev) => {
+      const exists = prev.includes(flight.id);
+      if (exists) return prev.filter((id) => id !== flight.id);
+      if (prev.length >= 2) return prev;
+      return [...prev, flight.id];
+    });
+  };
+
+  const openCompareModal = () => {
+    if (compareSelected.length === 2) setOpenCompare(true);
   };
 
   return (
@@ -226,6 +241,22 @@ export default function HomePage() {
             <h2 className="text-lg font-semibold text-gray-700">
               Kết quả: {flights.length} chuyến bay
             </h2>
+            {compareSelected.length === 2 && (
+              <Card>
+                <CardContent className="p-3 flex items-center justify-between">
+                  <div className="text-sm text-gray-700">
+                    Đã chọn so sánh: {' '}
+                    {flights.filter(f=> compareSelected.includes(f.id)).map((f, idx)=> (
+                      <span key={f.id} className="font-medium text-sky-700">{f.flight_code}{idx===0?' vs ':''}</span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" onClick={()=> setCompareSelected([])}>Hủy chọn</Button>
+                    <Button className="bg-sky-600 hover:bg-sky-700" onClick={openCompareModal}>So sánh</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
             
             {flights.length === 0 ? (
               <Card>
@@ -288,10 +319,14 @@ export default function HomePage() {
                       <div className="text-right min-w-[180px]">
                         <div className="mb-3">
                           <div className="text-sm text-gray-500">
-                            {classType === 'BUSINESS' ? 'Thương gia từ' : 'Phổ thông từ'}
+                            {classType === 'BUSINESS' ? 'Thương gia từ' : classType === 'ECONOMY' ? 'Phổ thông từ' : 'Giá thấp nhất'}
                           </div>
                           <div className="text-2xl font-bold text-orange-600">
-                            {classType === 'BUSINESS' ? formatPrice(flight.business_price) : formatPrice(flight.economy_price)}
+                            {classType === 'BUSINESS'
+                              ? formatPrice(flight.business_price)
+                              : classType === 'ECONOMY'
+                                ? formatPrice(flight.economy_price)
+                                : formatPrice(Math.min(Number(flight.economy_price||0), Number(flight.business_price||0)))}
                           </div>
                           <div className="text-xs text-gray-400 mt-1">
                             {(() => {
@@ -321,6 +356,16 @@ export default function HomePage() {
                         ) : (
                           <Button onClick={() => showDetails(flight.id)} className="w-full">Xem chi tiết</Button>
                         )}
+                        <div className="mt-2">
+                          <Button
+                            variant="outline"
+                            className={compareSelected.includes(flight.id) ? 'border-sky-500 text-sky-700' : ''}
+                            disabled={!compareSelected.includes(flight.id) && compareSelected.length >= 2}
+                            onClick={() => toggleCompare(flight)}
+                          >
+                            {compareSelected.includes(flight.id) ? 'Đã chọn so sánh' : 'Chọn so sánh'}
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -369,6 +414,60 @@ export default function HomePage() {
                 </Card>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Compare modal */}
+      <Dialog open={openCompare} onOpenChange={setOpenCompare}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>So sánh chuyến bay</DialogTitle>
+          </DialogHeader>
+          {compareSelected.length !== 2 ? (
+            <div>Vui lòng chọn 2 chuyến bay để so sánh.</div>
+          ) : (
+            (()=>{
+              const list = flights.filter(f=> compareSelected.includes(f.id));
+              const fa = list[0];
+              const fb = list[1];
+              const fmt = (d)=> new Date(d).toLocaleString('vi-VN');
+              const duration = (f)=> {
+                try { return Math.round((new Date(f.arrival_time)-new Date(f.departure_time))/60000); } catch { return null; }
+              };
+              const minPriceA = Math.min(Number(fa.economy_price||0), Number(fa.business_price||0));
+              const minPriceB = Math.min(Number(fb.economy_price||0), Number(fb.business_price||0));
+              const cheaper = minPriceA === minPriceB ? null : (minPriceA < minPriceB ? 'A' : 'B');
+              const durA = duration(fa);
+              const durB = duration(fb);
+              const faster = durA === durB ? null : (durA < durB ? 'A' : 'B');
+              return (
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className={`p-3 border rounded ${cheaper==='A' ? 'border-green-400' : ''} ${faster==='A' ? 'ring-1 ring-green-300' : ''}`}>
+                    <div className="font-bold text-sky-700">{fa.flight_code}</div>
+                    <div>{fa.origin.code} → {fa.destination.code} ({fa.aircraft_model})</div>
+                    <div>Khởi hành: {fmt(fa.departure_time)}</div>
+                    <div>Đến: {fmt(fa.arrival_time)}</div>
+                    <div>Thời lượng: {durA} phút {faster==='A' && <span className="text-green-600 font-medium">(Nhanh hơn)</span>}</div>
+                    <div className="mt-2">Giá phổ thông: <strong>{formatPrice(fa.economy_price)}</strong></div>
+                    <div>Giá thương gia: <strong>{formatPrice(fa.business_price)}</strong></div>
+                    <div className="mt-1">Giá thấp nhất: <strong className={`${cheaper==='A' ? 'text-green-700' : ''}`}>{formatPrice(minPriceA)}</strong></div>
+                    <div className="mt-1">Còn {fa.economy_available || 0} ghế PT • {fa.business_available || 0} ghế TG</div>
+                  </div>
+                  <div className={`p-3 border rounded ${cheaper==='B' ? 'border-green-400' : ''} ${faster==='B' ? 'ring-1 ring-green-300' : ''}`}>
+                    <div className="font-bold text-sky-700">{fb.flight_code}</div>
+                    <div>{fb.origin.code} → {fb.destination.code} ({fb.aircraft_model})</div>
+                    <div>Khởi hành: {fmt(fb.departure_time)}</div>
+                    <div>Đến: {fmt(fb.arrival_time)}</div>
+                    <div>Thời lượng: {durB} phút {faster==='B' && <span className="text-green-600 font-medium">(Nhanh hơn)</span>}</div>
+                    <div className="mt-2">Giá phổ thông: <strong>{formatPrice(fb.economy_price)}</strong></div>
+                    <div>Giá thương gia: <strong>{formatPrice(fb.business_price)}</strong></div>
+                    <div className="mt-1">Giá thấp nhất: <strong className={`${cheaper==='B' ? 'text-green-700' : ''}`}>{formatPrice(minPriceB)}</strong></div>
+                    <div className="mt-1">Còn {fb.economy_available || 0} ghế PT • {fb.business_available || 0} ghế TG</div>
+                  </div>
+                </div>
+              );
+            })()
           )}
         </DialogContent>
       </Dialog>

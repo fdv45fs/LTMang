@@ -78,6 +78,112 @@ def write_system_log(conn, user_id, action_type, details, do_commit=False):
         except Exception:
             pass
 
+def notify_users_about_flight_change(conn, flight_id, change_summary):
+    """Send notification emails to users who have bookings/payments on the flight.
+
+    Only attempts to send when SMTP envs are configured. Continues on failure per-recipient.
+    Logs each attempt via SystemLogs with action_type 'ADMIN_NOTIFY_FLIGHT_CHANGE'.
+    """
+    # Fetch flight info for context
+    flight = conn.execute(text(
+        """
+        SELECT f.flight_code, o.code AS origin_code, d.code AS dest_code,
+               f.departure_time, f.arrival_time, f.status
+        FROM Flights f
+        JOIN Airports o ON f.origin_airport_id = o.id
+        JOIN Airports d ON f.destination_airport_id = d.id
+        WHERE f.id = :fid
+        """
+    ), {'fid': flight_id}).fetchone()
+    if not flight:
+        return
+
+    # Distinct recipients: users with non-cancelled bookings related to this flight
+    rows = conn.execute(text(
+        """
+        SELECT DISTINCT u.id AS user_id, u.full_name, u.email
+        FROM Users u
+        JOIN Bookings b ON b.user_id = u.id
+        JOIN Tickets t ON t.booking_id = b.id
+        JOIN FlightSeats fs ON t.flight_seat_id = fs.id
+        JOIN FlightClasses fc ON fs.class_type_id = fc.id
+        WHERE fc.flight_id = :fid AND COALESCE(u.email, '') <> '' AND b.status != 'CANCELLED'
+        """
+    ), {'fid': flight_id}).fetchall()
+
+    if not rows:
+        return
+
+    # Compose common message
+    def fmt_dt(dt):
+        try:
+            return dt.isoformat() if dt else ''
+        except Exception:
+            return str(dt or '')
+
+    subject = f"Thông báo cập nhật chuyến bay {flight[0]} ({flight[1]}→{flight[2]})"
+    header = [
+        f"Chuyến bay {flight[0]} ({flight[1]}→{flight[2]}) đã được cập nhật bởi Admin.",
+        f"Khởi hành: {fmt_dt(flight[3])}",
+        f"Đến: {fmt_dt(flight[4])}",
+        f"Trạng thái: {flight[5]}",
+    ]
+    change_lines = ["Chi tiết thay đổi:", change_summary or "(không có chi tiết)"]
+    footer = [
+        "Bạn đã đặt vé hoặc thanh toán cho chuyến bay này.",
+        "Vui lòng kiểm tra lịch sử vé để đảm bảo thông tin chính xác.",
+        "Nếu có thắc mắc, vui lòng liên hệ hỗ trợ.",
+    ]
+    body_text = "\n".join(header + [""] + change_lines + [""] + footer)
+
+    # SMTP config
+    SMTP_HOST = os.getenv('SMTP_HOST')
+    SMTP_PORT = int(os.getenv('SMTP_PORT') or '587')
+    SMTP_USER = os.getenv('SMTP_USER')
+    SMTP_PASS = os.getenv('SMTP_PASS')
+    FROM_EMAIL = os.getenv('FROM_EMAIL') or (SMTP_USER or 'no-reply@example.com')
+
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        # Log a single failure summary and return (skip sending)
+        try:
+            write_system_log(conn, None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, recipients={len(rows)}, success=False, error=SMTP_NOT_CONFIGURED", do_commit=True)
+        except Exception:
+            pass
+        return
+
+    # Attempt sending per recipient
+    try:
+        import smtplib
+        from email.message import EmailMessage
+    except Exception:
+        write_system_log(conn, None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, recipients={len(rows)}, success=False, error=EMAIL_LIB_IMPORT_FAIL", do_commit=True)
+        return
+
+    for r in rows:
+        uid, full_name, email = r[0], r[1], (r[2] or '').strip()
+        if not email or '@' not in email:
+            # Skip invalid emails but log
+            write_system_log(conn, int(uid) if uid is not None else None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, to={email or 'N/A'}, success=False, error=INVALID_EMAIL", do_commit=True)
+            continue
+
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = FROM_EMAIL
+        msg['To'] = email
+        msg.set_content(body_text)
+
+        success = False
+        try:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+                s.starttls()
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+            success = True
+        except Exception as e:
+            write_system_log(conn, int(uid) if uid is not None else None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, to={email}, success=False, error={str(e)}", do_commit=True)
+        if success:
+            write_system_log(conn, int(uid) if uid is not None else None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, to={email}, success=True", do_commit=True)
+
 def _parse_dt(dt_str):
     """Parse various datetime string formats to 'YYYY-MM-DD HH:MM:SS'.
     Accepts 'YYYY-MM-DDTHH:MM', 'YYYY-MM-DD HH:MM', with or without seconds.
@@ -1256,6 +1362,20 @@ def admin_update_flight(flight_id):
                                  {'p': float(cu['price']), 'fid': flight_id, 'ct': cu['class_type']})
             write_system_log(conn, int(user_id) if user_id else None, 'ADMIN_UPDATE_FLIGHT', f"flight_id={int(flight_id)}", do_commit=False)
             trans.commit()
+            # After commit: notify users about change
+            changes = []
+            for k in ['departure_time', 'arrival_time', 'status']:
+                if k in data:
+                    changes.append(f"{k}={data.get(k)}")
+            for cu in class_updates:
+                if 'class_type' in cu and 'price' in cu:
+                    changes.append(f"price[{cu['class_type']}]={cu['price']}")
+            change_summary = ", ".join(changes)
+            try:
+                notify_users_about_flight_change(conn, flight_id, change_summary)
+            except Exception as e:
+                # Log but do not fail the API
+                write_system_log(conn, int(user_id) if user_id else None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, error={str(e)}", do_commit=True)
             return jsonify({'success': True})
         except Exception as e:
             trans.rollback()
@@ -1267,6 +1387,11 @@ def admin_delete_flight(flight_id):
     with get_db() as conn:
         trans = conn.begin()
         try:
+            # Notify users before deletion (flight will be removed)
+            try:
+                notify_users_about_flight_change(conn, flight_id, "Chuyến bay này đã bị xóa bởi Admin")
+            except Exception as e:
+                write_system_log(conn, int(user_id) if user_id else None, 'ADMIN_NOTIFY_FLIGHT_CHANGE', f"flight_id={int(flight_id)}, error={str(e)}", do_commit=True)
             # Hard delete: remove dependent records then flight
             # Resolve booking ids via tickets -> seats -> classes -> flight
             booking_ids_sql = text("""
