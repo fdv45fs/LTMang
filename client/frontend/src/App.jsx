@@ -1,28 +1,100 @@
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom"
-import HomePage from "./pages/HomePage"
-import SearchPage from "./pages/SearchPage"
-import BookingPage from "./pages/BookingPage"
-import HistoryPage from "./pages/HistoryPage"
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import LoginPage from './pages/LoginPage';
+import HomePage from './pages/HomePage';
+import BookingPage from './pages/BookingPage';
+import HistoryPage from './pages/HistoryPage';
+import RegisterPage from './pages/RegisterPage';
+import PaymentsPage from './pages/PaymentsPage';
+import AdminFlightsPage from './pages/AdminFlightsPage';
+
+// Protected Route component
+function ProtectedRoute({ children }) {
+  const { user, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-gray-500">Đang tải...</div>
+      </div>
+    );
+  }
+  
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  return children;
+}
+
+function AppRoutes() {
+  const { user } = useAuth();
+  
+  return (
+    <Routes>
+      <Route 
+        path="/login" 
+        element={user ? <Navigate to="/" replace /> : <LoginPage />} 
+      />
+      <Route 
+        path="/" 
+        element={
+          <ProtectedRoute>
+            <HomePage />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/booking" 
+        element={
+          <ProtectedRoute>
+            <BookingPage />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/history" 
+        element={
+          <ProtectedRoute>
+            <HistoryPage />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/payments" 
+        element={
+          <ProtectedRoute>
+            <PaymentsPage />
+          </ProtectedRoute>
+        } 
+      />
+      {user?.role === 'ADMIN' && (
+        <Route 
+          path="/admin/flights" 
+          element={
+            <ProtectedRoute>
+              <AdminFlightsPage />
+            </ProtectedRoute>
+          } 
+        />
+      )}
+      <Route
+        path="/register"
+        element={user ? <Navigate to="/" replace /> : <RegisterPage />}
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
 
 function App() {
   return (
-    <BrowserRouter>
-      <nav className="fixed top-0 left-0 right-0 bg-background border-b p-4 flex gap-4">
-        <Link to="/" className="hover:underline">Trang chủ</Link>
-        <Link to="/search" className="hover:underline">Tìm kiếm</Link>
-        <Link to="/booking" className="hover:underline">Đặt vé</Link>
-        <Link to="/history" className="hover:underline">Lịch sử</Link>
-      </nav>
-      <main className="pt-16">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/booking" element={<BookingPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-        </Routes>
-      </main>
-    </BrowserRouter>
-  )
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;
