@@ -16,7 +16,6 @@
 #include <pthread.h>
 #include <signal.h>
 
-#include "mongoose.h"
 #include "cJSON.h"
 #include "common.h"
 
@@ -27,7 +26,6 @@
 
 // Global variables
 static int server_running = 1;
-static struct mg_mgr mgr;
 
 // Forward declarations
 void *handle_client(void *arg);
