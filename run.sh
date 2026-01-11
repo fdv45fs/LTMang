@@ -36,7 +36,7 @@ run_database() {
 }
 
 run_server() {
-    echo -e "${GREEN}[SERVER] Starting Server Backend on port 8080...${NC}"
+    echo -e "${GREEN}[SERVER] Starting Server Backend on port 8082...${NC}"
     cd "$PROJECT_DIR"
     ./build/server/backend/server
 }
@@ -48,7 +48,7 @@ run_client_backend() {
 }
 
 run_frontend() {
-    echo -e "${GREEN}[FRONTEND] Starting Frontend on port 3000...${NC}"
+    echo -e "${GREEN}[FRONTEND] Starting Frontend...${NC}"
     cd "$PROJECT_DIR/client/frontend"
     npm run dev
 }
@@ -67,9 +67,9 @@ show_help() {
     echo "Commands:"
     echo "  build       Build C projects (server & client backend)"
     echo "  database    Run Database Service (Python - port 5000)"
-    echo "  server      Run Server Backend (C - port 8080)"
+    echo "  server      Run Server Backend (C - port 8082)"
     echo "  client      Run Client Backend (C - port 3001)"
-    echo "  frontend    Run Frontend (React - port 3000)"
+    echo "  frontend    Run Frontend (React - port 5173)"
     echo "  install     Install frontend dependencies"
     echo "  all         Build and run all C services (in background)"
     echo "  help        Show this help message"

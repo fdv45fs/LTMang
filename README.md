@@ -1,20 +1,27 @@
 # Ứng Dụng Đặt Vé Máy Bay
 
-Ứng dụng demo kiến trúc client-server với:
-- **Server Backend**: C TCP server + HTTP client (Mongoose) (Port 8080)
+**Codebase C chạy trên Ubuntu, không tương thích với Windows**
+
+Kiến trúc client-server với:
+- **Server Backend**: C TCP server (với Client Backend, port 8082) + HTTP client (với Database service)
 - **Database Service**: Python Flask HTTP API (Port 5000)
-- **Client Backend**: C HTTP server (Mongoose) + TCP client (Port 3001)
-- **Client Frontend**: React + Vite + shadcn UI (Port 5173)
+- **Client Backend**: TCP client (với Server Backend) + C HTTP server (Mongoose, với Client Frontend, port 3001)
+- **Client Frontend**: React + Vite + shadcn UI (Port 5173 để truy cập trên browser)
+
+Lí do, ưu điểm kiến trúc:
+- Backend của Server và Client dùng C, giao tiếp bằng TCP
+- Biến truy vấn database thành 1 service giúp dễ thay thế database và viết truy vấn
+- Sử dụng được framework frontend hiện đại, để có thể kết nối React với Client Backend cần sử dụng HTTP server
 
 ## Kiến trúc
 
 ```
 React Frontend (Port 5173)
-    ↓ HTTP (fetch)
+    ↓ HTTP
 Client Backend - Mongoose HTTP Server (Port 3001)
-    ↓ TCP Socket (binary message)
-Server Backend - TCP Server (Port 8080)
-    ↓ HTTP + JSON (Mongoose client)
+    ↓ TCP Socket
+Server Backend - TCP Server (Port 8082)
+    ↓ HTTP + JSON
 Database Service - Flask HTTP API (Port 5000)
     ↓ SQLAlchemy
 PostgreSQL (Supabase)
@@ -52,13 +59,14 @@ Setup/
 │   └── frontend/              # React + Vite + shadcn UI
 ├── CMakeLists.txt
 ├── run.sh
-├── seed_database.py
 └── README.md
 ```
 
 ## Cài đặt
 
 ### 1. Cấu hình Database
+
+
 
 Tạo file `.env` từ `.envexample`:
 ```bash

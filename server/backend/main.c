@@ -1,6 +1,6 @@
 /**
  * Flight Booking Server - TCP Server + HTTP Client
- * Port: 8080
+ * Port: 8082
  * 
  * - Nhận binary message từ Client Backend qua TCP
  * - Gọi Database Service qua HTTP (Mongoose)
@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/time.h>
 
 #include "cJSON.h"
 #include "common.h"
@@ -26,16 +27,6 @@
 
 // Global variables
 static int server_running = 1;
-
-// Forward declarations
-void *handle_client(void *arg);
-char *call_database_api(const char *method, const char *endpoint, const char *body);
-void handle_login(int client_fd, MessageHeader *header, void *payload);
-void handle_search_flights(int client_fd, MessageHeader *header, void *payload);
-void handle_book_flight(int client_fd, MessageHeader *header, void *payload);
-void handle_list_tickets(int client_fd, MessageHeader *header, void *payload);
-void handle_payment(int client_fd, MessageHeader *header, void *payload);
-void handle_get_airports(int client_fd, MessageHeader *header);
 
 // Signal handler
 void signal_handler(int sig) {
