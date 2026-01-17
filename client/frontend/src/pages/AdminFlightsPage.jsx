@@ -11,6 +11,7 @@ export default function AdminFlightsPage() {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [form, setForm] = useState({
     aircraft_id: '', origin_airport_id: '', destination_airport_id: '',
     departure_time: '', arrival_time: '', status: 'SCHEDULED',
@@ -26,10 +27,10 @@ export default function AdminFlightsPage() {
     setLoading(false);
     if (res?.success) setFlights(res.flights || []);
     else setError(res?.message || 'Không tải được danh sách');
+    setHasLoaded(true);
   };
 
   useEffect(() => {
-    loadFlights();
     (async () => {
       const [ap, ac] = await Promise.all([getAirports(), getAircrafts()]);
       if (ap?.success) setAirports(ap.airports || []);
@@ -160,10 +161,20 @@ export default function AdminFlightsPage() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Danh sách</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Danh sách</CardTitle>
+              <Button variant="outline" size="sm" onClick={loadFlights} disabled={loading}>
+                Hiện toàn bộ chuyến bay
+              </Button>
+            </div>
+          </CardHeader>
           <CardContent>
             {loading ? <div>Đang tải...</div> : (
               <div className="space-y-4">
+                {!hasLoaded && flights.length === 0 && (
+                  <div className="text-sm text-gray-500">Chưa tải danh sách. Bấm “Hiện toàn bộ chuyến bay”.</div>
+                )}
                 {flights.map(f => (
                   <div key={f.id} className="p-4 border rounded">
                     <div className="flex justify-between">

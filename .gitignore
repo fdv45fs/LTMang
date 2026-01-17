@@ -45,3 +45,4 @@ Thumbs.db
 .cache/
 server/backend/server
 client/backend/client
+zipped_project.zip

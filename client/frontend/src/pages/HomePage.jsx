@@ -26,11 +26,16 @@ export default function HomePage() {
   const [searched, setSearched] = useState(false);
   const [passengers, setPassengers] = useState(1);
   const [classType, setClassType] = useState('ALL');
+  const [searchError, setSearchError] = useState('');
+  const hasAnyFilter = (
+    (origin && origin !== '0') ||
+    (destination && destination !== '0') ||
+    !!startDate ||
+    !!endDate
+  );
 
   useEffect(() => {
     loadAirports();
-    // Load danh sách ban đầu (không filter)
-    handleSearch();
   }, []);
 
   const loadAirports = async () => {
@@ -41,6 +46,11 @@ export default function HomePage() {
   };
 
   const handleSearch = async () => {
+    if (!hasAnyFilter) {
+      setSearchError('Vui lòng chọn ít nhất một tiêu chí để tìm kiếm.');
+      return;
+    }
+    setSearchError('');
     setLoading(true);
     // Gọi API với đầy đủ 4 tham số: origin, destination, start_date, end_date
     const result = await searchFlights(
@@ -227,9 +237,10 @@ export default function HomePage() {
               </div>
               {/* Nút tìm kiếm */}
               <div>
-                <Button onClick={handleSearch} disabled={loading} className="w-full bg-sky-600 hover:bg-sky-700">
+                <Button onClick={handleSearch} disabled={loading || !hasAnyFilter} className="w-full bg-sky-600 hover:bg-sky-700">
                   {loading ? 'Đang tìm...' : 'Tìm kiếm'}
                 </Button>
+                {searchError && <div className="mt-2 text-sm text-red-500">{searchError}</div>}
               </div>
             </div>
           </CardContent>
