@@ -1,6 +1,7 @@
 # Ứng Dụng Đặt Vé Máy Bay
 
 **Codebase C chạy trên Ubuntu, không tương thích với Windows**
+
 **Database free tự tắt sau 1 tuần không hoạt động**
 
 ## 1. Hướng dẫn chạy từ file zip (Môi trường chưa cài đặt)
